@@ -4,34 +4,19 @@ import pandas as pd
 import csv
 import gzip
 import pytricia
-import ipaddress
 from netaddr import *
 from collections import defaultdict
 import math
-import dpath.util as dp
+import dpath.util as dp 
 import io
-
-t = 60
-bucket_output = 300
-e=  120
-q = 0.95
-
-cidr_max = {
-    4: 28,
-    6: 48
-}
-c = {
-    4: 64,
-    6: 24
-}
-
+import os
+import argparse
 
 
 ##################################
 ### PROTOTYPING IPDRange Class ###
 ##################################
 
-DEBUG =True
 
 ### DICT implementation
 
@@ -67,18 +52,21 @@ range_lookup_dict[6].insert("::/0", "::/0")
 ## lookup in pytricia tree and return corresponding range
 def get_corresponding_range(ip):
     ip_version = 4 if not ":" in ip else 6
-    res = "0.0.0.0/0"
     try:
         res =range_lookup_dict[ip_version][ip]
     except:
         if DEBUG: print("KEYERROR: ", ip)
         if DEBUG: print("  current ranges:", list(range_lookup_dict[ip_version]))
+    
+        res="0.0.0.0/0" if ip_version == 4 else "::/0"
     # if DEBUG: print("check corresponding range;  ip: {} ; range: {}".format(ip_address, res))
     return res
 
 def mask_ip(ip_address):
     ip_version = 6 if ":" in ip_address else 4
-    return str(ipaddress.ip_network("{}/{}".format(ip_address, cidr_max[ip_version]), strict=False)).split("/")[0]
+    return str(IPNetwork(f"{ip_address}/{cidr_max[ip_version]}").network)
+    
+    
 
 def __get_min_samples(path, decrement=False):
         t = path.split("/")
@@ -125,9 +113,12 @@ def __convert_range_path_to_single_elems(path):
 def get_sample_count(path):
     count=0
     ip_version, mask, range = __convert_range_path_to_single_elems(path)
+    if DEBUG: print (path)
+    matc = subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {}).get('match', -1)
+    misc = subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {}).get('miss', -1)
 
-    count+=subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {}).get('match', -1)
-    count+=subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {}).get('miss', -1)
+    
+    count = matc+misc
 
     if count < 0: 
         
@@ -164,6 +155,7 @@ def get_prevalent_ingress(path, raw=False):
 
     # calculate prevalent ingress
     counter_dict=defaultdict(__init_with_zero)
+    result_dict={}
     search_path="{}/**/ingress".format(path)
     for p, v in dp.search(subnet_dict, search_path, yielded=True): 
         counter_dict[v]+=1
@@ -177,7 +169,7 @@ def get_prevalent_ingress(path, raw=False):
         if p_match == 0: return None
         
         ratio = p_match / (p_match+p_miss)
-
+    
         if raw:
             return {p_ingress : p_match, 'miss' : p_miss}
 
@@ -192,6 +184,7 @@ def get_prevalent_ingress(path, raw=False):
         ratio= -1
         for ingress in counter_dict:
             ratio = counter_dict.get(ingress) / sample_count
+            result_dict[ingress] = round(ratio,3)
             # if DEBUG: print("       ratio for {}: {:.2f}".format(ingress, ratio))
             if ratio >= q: 
                 cur_prevalent = ingress
@@ -201,7 +194,18 @@ def get_prevalent_ingress(path, raw=False):
         if raw:
             return counter_dict
 
-    if cur_prevalent == None: ratio = -1
+    if cur_prevalent == None: 
+        ratio = -1
+        if DEBUG: 
+            print(" no prevalent ingress found: ") 
+
+            #sorted_value_index = np.argsort(result_dict.values())
+            dictionary_keys = list(result_dict.keys())
+            sorted_dict = {dictionary_keys[i]: sorted(result_dict.values(), reverse=True)[i] for i in range(len(dictionary_keys))}
+    
+            print(sorted_dict)
+
+
     if DEBUG: print("        prevalent for {}: {} ({:.2f})".format(path, cur_prevalent, ratio))
 
     return cur_prevalent
@@ -233,7 +237,8 @@ def set_prevalent_ingress(path, ingress):
     dp.new(subnet_dict, f"{path}/last_seen", last_seen)
 
     
-    if DEBUG: print(f"ABC       counter values - match: {match}  miss: {sample_count-match}  sample_count: {sample_count} (last_seen: {last_seen}) ------ {tmp_counter}")
+    #if DEBUG: 
+    print(f"SET PREVALENT INGRESS: {path} => {ingress}       counter values - match: {match}  miss: {sample_count-match}  sample_count: {sample_count} (last_seen: {last_seen}) ------ {tmp_counter}")
 
 
 # iterates over all ranges that are already classified
@@ -385,8 +390,8 @@ def add_to_subnet(ip, ingress, last_seen):
 
     ip_version = 4 if not ":" in ip else 6
 
-    ip = mask_ip(ip)
-    range, mask = __split_ip_and_mask(get_corresponding_range(ip))
+    masked_ip = mask_ip(ip)
+    range, mask = __split_ip_and_mask(get_corresponding_range(masked_ip))
     
 
     # if subnet is already prevalent -> do not add IPs but increment counters
@@ -394,50 +399,68 @@ def add_to_subnet(ip, ingress, last_seen):
     if p_ingress!=None:
         if ingress == p_ingress:
             subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['match'] +=1
-            print(f"({ip},{ingress},{last_seen}) : {p_ingress} == {ingress} --> counter: {subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['match']}" )
+            #if DEBUG: print(f"({masked_ip},{ingress},{last_seen}) : {p_ingress} == {ingress} --> counter: {subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['match']}" )
         else:
             subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['miss'] +=1
-            print(f"({ip},{ingress},{last_seen}) : {p_ingress} != {ingress} --> counter: {subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['miss']}" )
+            #if DEBUG: print(f"({masked_ip},{ingress},{last_seen}) : {p_ingress} != {ingress} --> counter: {subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['miss']}" )
         subnet_dict.get(ip_version, {}).get(mask,{}).get(range,{})['prevalent_last_seen'] = int(last_seen)
     else:
         # key is not existing
-        dp.new(subnet_dict, [int(ip_version), int(mask), range, ip, 'last_seen'], int(last_seen))
-        dp.new(subnet_dict, [int(ip_version), int(mask), range, ip, 'ingress'], ingress)
+        dp.new(subnet_dict, [int(ip_version), int(mask), range, masked_ip, 'last_seen'], int(last_seen))
+        dp.new(subnet_dict, [int(ip_version), int(mask), range, masked_ip, 'ingress'], ingress)
         # if DEBUG: print("adding ", ip, ingress, last_seen)
     
-## TODO how to decrement misses and matches??
-def __magic_decrement_function(current_ts, path, last_seen):
-    # TODO ask Ingmar for his solution
-    #
-    # as a placeholder we do the following:
-    if last_seen  < current_ts - e : 
-        s = __get_min_samples(path=path, decrement=True)
-        t_count = int((current_ts -e - last_seen) / t)
-        dec = int(math.pow(s, t_count))
 
-        if DEBUG: print(f"{path} decrement by: {dec}")
+def __decay_counter(current_ts, path, last_seen, method="none"): # default, linear, stefan
 
-        ip_version, mask, range = __convert_range_path_to_single_elems(path)
+    # sub getCleanKeepFactor{
+    #   (my $expireTime, my $lastUpdate) = @_;
 
-        # decrement match nad miss counters by relative share
-        try:
-            # get current counter values
-            matc = subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['match'] 
-            misc = subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['miss'] 
-            match_ratio= matc / (matc+misc)
+    #   my $age = $expireTime - $lastUpdate;
+    #   return 1 - (($age <= 0) ? $bucketExpireKeepFraction : ($bucketExpireKeepFraction/(int($age/$bucketSize)+1)));
+    # }
+    # my $reduce = int($cidrIntRef->{ip}{$color}{$ipInt}{c} * (getCleanKeepFactor($expireTime, $cidrIntRef->{ip}{$color}{$ipInt}{u})));
+
+    # $cidrIntRef->{ip}{$color}{$ipInt}{c} -= $reduce;
+    ip_version, mask, range = __convert_range_path_to_single_elems(path)
+    matc = subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['match'] 
+    misc = subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['miss'] 
+
+    age = current_ts - last_seen
+
+
+    print (matc, misc, age)
+    reduce = 0
+    if method == 'default':
         
-            # decrement by relative share
-            matc = max(0, matc - int(dec * match_ratio) )
-            misc = max(0, misc - int(dec * (1-match_ratio)))
+        if age <=0:
+            reduce = bucketExpireKeepFraction / (int(age/t)+1 )
+        else: 
+            reduce = bucketExpireKeepFraction
 
+        matc *= reduce
+        misc *= reduce
 
+    elif method == "stefan": # 0.1% of min samples for specific mask exponentially increasing by expired time buckets
+        s = __get_min_samples(path=path, decrement=True) 
+        reduce = int(math.pow(s, (int(age/t)+1 )))
+        matc -= reduce * (matc / (matc + misc))
+        misc -= reduce * (misc / (matc + misc))
 
-            subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['match'] = matc
-            subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['miss']  = misc
-            
-        except:
-            if DEBUG: print(f"ERROR {path} does not exist")
+    elif method == "linear":
+        if age > e: 
+            reduce = __get_min_samples(path=path, decrement=True)
+            matc -= 10 #reduce * (matc / (matc + misc))
+            misc -= 10 #reduce * (misc / (matc + misc))
+        else:
+            return
 
+    elif method == "none":
+        return
+    if DEBUG: print(f"{path} decrement by: {reduce} ({method})")
+
+    subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['match'] = int(matc)
+    subnet_dict.get(ip_version,{}).get(mask,{}).get(range, {})['miss'] =  int(misc)
 
 # remove all ips older than e seconds
 def remove_old_ips_from_range(current_ts):
@@ -448,24 +471,29 @@ def remove_old_ips_from_range(current_ts):
     #       already classified prefixes -> decrement function
 
     for path, ts in dp.search(subnet_dict, "**/prevalent_last_seen", yielded=True):
-        __magic_decrement_function(current_ts, path, ts)
+        __decay_counter(current_ts=current_ts, path=path, last_seen=ts, method=decay_method)
 
 
     ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones  
     for path, ts in dp.search(subnet_dict, "**/last_seen",yielded=True): 
         # print(path, ts)
+        # age= 
         if int(ts)  < current_ts - e : 
             # if DEBUG: print("remove old ip: {} ({})".format(path, ts))
             pop_list.append(path)
 
     if DEBUG: print("    removing {} expired IP addresses".format(len(pop_list)))
     # b= len(subnet_dict["4"]["0"]["0.0.0.0"])
-    for i, path in enumerate(pop_list): 
+    for path in pop_list: 
         try:
             path_elems= path.split("/")
-
+            ip_version=int(path_elems[0])
+            mask=int(path_elems[1])
+            range=path_elems[2]
+            ip=path_elems[3]
+            
             #dp.delete(subnet_dict, path.replace("/last_seen", "")) # too slow
-            subnet_dict[path_elems[0]][path_elems[1]][path_elems[2]].pop(path_elems[3])
+            subnet_dict[ip_version][mask][range].pop(ip)
 
         except:
             if DEBUG: print("    ERROR: {} cannot be deleted".format(path))
@@ -477,15 +505,18 @@ def dump_to_file(current_ts):
     # this should be the output format
     # only dump prevalent ingresses here
     # 
-    output_file=f"results/range.{current_ts}.gz"
-
+    output_file=f"results/q{q}_c{c[4]}-{c[6]}_cidr_max{cidr_max[4]}-{cidr_max[6]}_t{t}_e{e}_decay{decay_method}"
+    os.makedirs(output_file, exist_ok=True)
+    output_file += f"/range.{current_ts}.gz"
+    print(f"DUMP TO FILE {output_file}")
     with gzip.open(output_file, 'wb') as ipd_writer:
         # Needs to be a bytestring in Python 3
         with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
             #encode.write("test")
             for p, i in dp.search(subnet_dict, "**/prevalent", yielded=True): 
             #ipd_writer.write(b"I'm a log message.\n")
-                if DEBUG: print(p,i)
+                #if DEBUG: 
+                print(p,i)
                 ip_version, mask, range = __convert_range_path_to_single_elems(p)
                 min_samples=__get_min_samples(p)
                 p= p.replace("/prevalent", "")
@@ -500,8 +531,69 @@ def dump_to_file(current_ts):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-c4', default=64, type=float)
+    parser.add_argument('-c6', default=24, type=float)
+    parser.add_argument('-t', default=60, type=int)
+    parser.add_argument('-b', default=300, type=int)
+    parser.add_argument('-e', default=120, type=int)
+    parser.add_argument('-q', default=0.95, type=float)
+    parser.add_argument('-cidrmax4', default=28, type=int)
+    parser.add_argument('-cidrmax6', default=48, type=int)
+    parser.add_argument('-d', default="/data/slow/mehner/netflow.csv", type=str) # netflow100000.csv netflow100000000.csv
+    parser.add_argument('-decay', default="default", type=str)
+    parser.add_argument('-debug', default=False, type=bool)
+
+    
+    args = parser.parse_args()
+    print("--- parametrization ---")
+    print(f"c4 {args.c4}")
+    print(f"c6 {args.c6}")
+    print(f"t {args.t}")
+    print(f"b {args.b}")
+    print(f"e {args.e}")
+    print(f"q {args.q}")
+    print(f"cidrmax4 {args.cidrmax4}")
+    print(f"cidrmax6 {args.cidrmax6}")
+    print(f"dataset {args.d}")
+    print(f"decay {args.decay}")
+    print(f"debug {args.debug}")
+    print("------------------------")
+
+    dataset=args.d
+    t = args.t #60
+    bucket_output = args.b #60
+    e=  args.e #120
+    q = args.q # 0.80
+    decay_method=args.decay
+    DEBUG =args.debug
+
+    cidr_max = {
+        4: args.cidrmax4,
+        6: args.cidrmax6
+    }
+    c = {
+        4: args.c4,
+        6: args.c6
+    }
+
+
+    print("min_sanples /10: {}".format(__get_min_samples("4/10/")))
+    print("min_sanples /20: {}".format(__get_min_samples("4/20/")))
+    print("min_sanples /28: {}".format(__get_min_samples("4/28/")))
+    print()
+
+
+    
+    
+
+
+
+
+
     print('read preprocessed netflow file')
-    netflow_df= pd.read_csv("/data/slow/mehner/netflow100000.csv", names= ["src_ip","ts_end","ingress"])
+    netflow_df= pd.read_csv(dataset, names= ["src_ip","ts_end","ingress"])
 
     print(f'bin ts_end to {t}s bins and sort by ts')
     netflow_df['ts_end'] = netflow_df.ts_end.apply(lambda x: int(int(x) / t) * t) 
@@ -553,6 +645,6 @@ if __name__ == '__main__':
                 elif r == None:
                     if DEBUG: print("skip this range since there is nothing to do here")
                     break
-
+        #if current_ts % bucket_output == 0: # dump every 5 min to file
         dump_to_file(current_ts)
         if DEBUG: print("\n   -------------- \n")
