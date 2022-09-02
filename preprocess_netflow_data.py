@@ -6,13 +6,13 @@ from collections import defaultdict
 from multiprocessing import Pool
 import os
 
-PROCS = 20
-
+PROCS = 50
+chunksize=10000
 cols=['tag', 'peer_src_ip', 'in_iface', 'out_iface', 'src_ip', 'dst_net', 'src_port', 'dst_port', 'proto', '__', '_', 'ts_start', 'ts_end', 'pkts', 'bytes']
 
 # netflow_path="/data/slow/mehner/netflow/dummy_netflow.gz"
-ingresslink_file = "/data/slow/mehner/ingresslink/1605571200.gz"                # if we get more netflow, we should adjust the file 
-router_ip_mapping_file="/data/slow/mehner/router_lookup_tables/1605571200.txt"
+ingresslink_file = "/data/slow/mehner/ipd/ingresslink/1605571200.gz"                # if we get more netflow, we should adjust the file 
+router_ip_mapping_file="/data/slow/mehner/ipd/router_lookup_tables/1605571200.txt"
 
 ###################################################
 ########### ROUTER NAME <--> IP MAPPING ###########
@@ -40,10 +40,28 @@ print("  ...done\n")
 
 
 def dump_netflow_to_pandas(netflow_file):
+    nf_ps=netflow_file.split("/")[-3]
+    nf_ts=netflow_file.split("/")[-1].replace(".gz","").replace("@00000000000000","")
 
+    os.makedirs("/data/slow/mehner/ipd/netflow_preprocessed", exist_ok=True)
+    filename = f"/data/slow/mehner/ipd/netflow_preprocessed/{nf_ps}_{nf_ts}"
+
+    if os.path.exists(filename) and os.path.getsize(filename) > 0:
+        print(f"file {filename} already exists - skip")
+        return False
+
+    print(f"--> {filename}")
     # TAG     PEER_SRC_IP  IN IFACE OUT_IFACE SRC_IP          DST_NET        SRC_PORT DST_PORT PROTO  _       _       TS_START        TS_END    PKTS    BYTES
     # 0       194.25.7.141    13      1571    91.127.69.122   31.13.84.4      40730   443     tcp     0       i       1605639641      1605639641 1       121
-    netflow_df = pd.read_csv(netflow_file, compression='gzip', header=None, sep=',', quotechar='"', error_bad_lines=False, names=cols, usecols = ['peer_src_ip', 'in_iface', 'src_ip', 'ts_end'])
+    #netflow_df = pd.read_csv(netflow_file, compression='gzip', header=None, sep=',', quotechar='"', on_bad_lines='skip', names=cols, usecols = ['peer_src_ip', 'in_iface', 'src_ip', 'ts_end'], chunksize=100000)
+
+    netflow_df = pd.DataFrame()
+    for i, chunk in enumerate(pd.read_csv(netflow_file, compression='gzip', header=None, sep=',', quotechar='"', names=cols, usecols = ['peer_src_ip', 'in_iface', 'src_ip', 'ts_end'], chunksize=chunksize, low_memory=False)):
+        netflow_df = pd.concat([netflow_df, chunk])
+
+
+
+
     print("read: ", len(netflow_df))
 
     ## pandas pipe  -> https://towardsdatascience.com/25-pandas-functions-you-didnt-know-existed-p-guarantee-0-8-1a05dcaad5d0
@@ -69,15 +87,17 @@ def dump_netflow_to_pandas(netflow_file):
     
     # TODO bin to time; mask ip not done in this step
 
-    nf_ps=netflow_file.split("/")[-3]
-    nf_ts=netflow_file.split("/")[-1].replace(".gz","").replace("@00000000000000","")
 
-    os.makedirs("/data/slow/mehner/netflow-preprocessed", exist_ok=True)
-    filename = f"/data/slow/mehner/netflow-preprocessed/{nf_ps}_{nf_ts}.pq"
     
     print(netflow_df.head())
-    netflow_df.to_csv(f"{filename[:-3]}.csv", index=False, header=False)
-    #netflow_df.to_parquet(filename, compression='gzip')
+    netflow_df.to_csv(f"{filename}.csv", index=False, header=False)
+    try:
+        netflow_df.to_parquet(f"{filename}.parquet")
+    except:
+         print("ERROR: dump netflow to paquet not possible")
+    # #netflow_df.to_parquet(filename, compression='gzip')
+
+    print(f"<-- {filename}")
     return True
 
 
@@ -87,8 +107,33 @@ def dump_netflow_to_pandas(netflow_file):
 if __name__ == "__main__":
     netflow_files=[]
     for i in range(0,26):
-        netflow_files.append("/data/slow/mehner/netflow/parser_{:02d}/archived/@000000000000001605639660.gz".format(i))
-        netflow_files.append("/data/slow/mehner/netflow/parser_{:02d}/archived/@000000000000001605643260.gz".format(i))
+        # netflow_files.append("/data/slow/mehner/netflow_preprocessed/parser_{:02d}/archived/@000000000000001605639660.gz".format(i))
+        # netflow_files.append("/data/slow/mehner/netflow_preprocessed/parser_{:02d}/archived/@000000000000001605643260.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605556860.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605560460.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605564060.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605567660.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605571260.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605574860.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605578460.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605582060.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605585660.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605589260.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605592860.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605596460.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605600060.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605603660.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605607260.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605610860.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605614460.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605618060.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605621660.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605625260.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605628860.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605632460.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605636060.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605639660.gz".format(i))
+        netflow_files.append("/data/slow/mehner/ipd/netflow_recording/parser_{:02d}/archived/@000000000000001605643260.gz".format(i))
 
     pool = Pool(processes=PROCS)
 
@@ -97,32 +142,7 @@ if __name__ == "__main__":
 
     for netflow_parser_result in res:
         print (netflow_parser_result)
-        # this is the productive loop
-        # for curr_ts in netflow_parser_result:
-        #     print(curr_ts, " -> ", netflow_parser_result[curr_ts])
-        #     res_dict[curr_ts]['match'] += netflow_parser_result[curr_ts].get("match",0)
-        #     res_dict[curr_ts]['miss'] += netflow_parser_result[curr_ts].get("miss",0)
-            # print("{}: {} / {} ".format(curr_ts, res_dict[curr_ts]['match'], res_dict[curr_ts]['all']))
-
-
-    # print()
-    # print()
-    # print("summary")
-    # print("-----------------------")
-    # get ratio
-
-    # header = ['ts', 'match', 'miss', 'ratio']
-    # with open("{}/{}.log".format(output_folder, range_file_ts), 'w') as csv_file: 
-    #     csvwriter = csv.writer(csv_file)
-    #     csvwriter.writerow(header)
-    #     for result_ts in res_dict.keys():
-    #         # netflow_parser_result = timestamp
-    #         match_count = res_dict[result_ts].get("match")
-    #         miss_count = res_dict[result_ts].get('miss') 
-    #         ratio = match_count / (match_count + miss_count)
-    #         print("{}: match: {}\tmiss: {}\tratio: {:.3f}".format(result_ts, match_count, miss_count, ratio))
-    #         csvwriter.writerow([result_ts, match_count, miss_count, "{:.3f}".format(ratio)])
-    
+        
     pool.close()
     pool.join()
  
