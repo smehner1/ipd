@@ -746,7 +746,7 @@ if __name__ == '__main__':
     netflow_df['ts_end'] = netflow_df.ts_end.apply(lambda x: int(int(x) / t) * t) 
     netflow_df.sort_values(by = 'ts_end', inplace=True)
 
-    for current_ts in sorte (netflow_df.ts_end.unique()):
+    for current_ts in sorted(netflow_df.ts_end.unique()):
         cur_slice = netflow_df.loc[netflow_df.ts_end == current_ts]
         
         for i in cur_slice.itertuples():

@@ -1,0 +1,33 @@
+05-Sep-22 08:53:11 INFO run last ts: 66741 flows added - now current ts: 1605556740
+05-Sep-22 08:53:11 INFO remove_old_ips_from_range   > remove IPs older than 120 seconds
+05-Sep-22 08:53:12 INFO remove_old_ips_from_range     removing 0 expired IP addresses
+05-Sep-22 08:53:12 INFO is_prevalent_ingress_still_valid   > Prevalent color still valid (s_color >= q)
+05-Sep-22 08:53:12 INFO run_ipd    current_range: 6/0/::
+05-Sep-22 08:53:12 WARNING get_sample_count  key 6/0/:: does not exist
+05-Sep-22 08:53:12 INFO run_ipd skip this range since there is nothing to do here
+05-Sep-22 08:53:12 INFO run_ipd    current_range: 4/0/0.0.0.0
+05-Sep-22 08:53:12 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) 4/0/0.0.0.0   s_ipcount=14760 min_samples=4194304
+05-Sep-22 08:53:12 INFO run_ipd       NO -> join siblings
+05-Sep-22 08:53:12 INFO join_siblings         join siblings for range 4/0/0.0.0.0
+05-Sep-22 08:53:12 INFO join_siblings         join siblings not possible - we are at the root of the tree
+05-Sep-22 08:53:12 INFO run_ipd .............Finished.............
+
+
+05-Sep-22 08:53:39 INFO run last ts: 375889 flows added - now current ts: 1605556800
+05-Sep-22 08:53:39 INFO remove_old_ips_from_range   > remove IPs older than 120 seconds
+05-Sep-22 08:53:44 INFO remove_old_ips_from_range     removing 0 expired IP addresses
+05-Sep-22 08:53:44 INFO is_prevalent_ingress_still_valid   > Prevalent color still valid (s_color >= q)
+05-Sep-22 08:53:47 INFO run_ipd    current_range: 6/0/::
+05-Sep-22 08:53:47 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) 6/0/::   s_ipcount=2390 min_samples=103079215104
+05-Sep-22 08:53:47 INFO run_ipd       NO -> join siblings
+05-Sep-22 08:53:47 INFO join_siblings         join siblings for range 6/0/::
+05-Sep-22 08:53:47 INFO join_siblings         join siblings not possible - we are at the root of the tree
+05-Sep-22 08:53:47 INFO run_ipd    current_range: 4/0/0.0.0.0
+05-Sep-22 08:53:47 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) 4/0/0.0.0.0   s_ipcount=61501 min_samples=4194304
+05-Sep-22 08:53:47 INFO run_ipd       NO -> join siblings
+05-Sep-22 08:53:47 INFO join_siblings         join siblings for range 4/0/0.0.0.0
+05-Sep-22 08:53:47 INFO join_siblings         join siblings not possible - we are at the root of the tree
+05-Sep-22 08:53:47 INFO dump_to_file dump to file: results/q0.949_c64-24_cidr_max28-48_t60_e120_decaydefault/range.1605556800.gz
+05-Sep-22 08:53:50 INFO run_ipd .............Finished.............
+
+
