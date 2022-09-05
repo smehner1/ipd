@@ -23,6 +23,7 @@ linear_decay = 1000
 
 bundle_indicator=".b_"
 
+TEST=True
 
 t=60
 bucket_output = 5*t
@@ -161,10 +162,7 @@ class IPD:
         return f"{ip_version}/{mask}/{prange}"
 
     def __convert_range_path_to_single_elems(self, path):
-        t = path.split("/")
-        ip_version = int(t[0])
-        mask = int(t[1])
-        prange= t[2]
+        ip_version, mask, prange = path
         return ip_version, mask, prange
 
     def __sort_dict(self, dict_to_sort):
@@ -242,7 +240,7 @@ class IPD:
 
 
         else:
-            search_path="{}/**/ingress".format(path)
+            search_path=f"{ip_version}/{mask}/{prange}/*/ingress"
             for p, v in dp.search(self.subnet_dict, search_path, yielded=True):
                 counter_dict[v]+=1
 
@@ -315,8 +313,8 @@ class IPD:
         #   already classified ranges => increment counters for misses and matches; decrement by dec_function
         #   not classified ranges = add IPs
         #
-
-        dp.search(self.subnet_dict, f"{path}/**/ingress")
+        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
+        #dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress")
         match=0
         if type(ingress) == list: # handle bundle
             # count matches for that ingress'es
@@ -326,7 +324,7 @@ class IPD:
             # bundle_name+=")"
 
             tmp_dict=defaultdict(int)
-            for p,v in dp.search(self.subnet_dict, f"{path}/**/ingress", yielded=True):
+            for p,v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
                 if v in ingress:
                     tmp_dict[v] +=1
                     match +=1
@@ -338,7 +336,7 @@ class IPD:
 
         else: # handle single ingress link
 
-            for p,v in dp.search(self.subnet_dict, f"{path}/**/ingress", yielded=True):
+            for p,v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
                 if v == ingress: match += 1
 
 
@@ -346,7 +344,7 @@ class IPD:
 
         last_seen=0
         try:   
-            last_seen = max(dp.search(self.subnet_dict, f"{path}/**/last_seen", yielded=True))[1]
+            last_seen = max(dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/last_seen", yielded=True))[1]
         except:
             logging.critical("last_seen not avaliable: {}".format(dp.get(self.subnet_dict, f"{path}")))
 
@@ -584,9 +582,9 @@ class IPD:
         p_ingress=self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{}).get('prevalent', None)
 
         if p_ingress==None: # 1) no prevalent ingress found for that range
-            dp.new(self.subnet_dict, [int(ip_version), int(mask), prange, masked_ip, 'last_seen'], int(last_seen))
-            dp.new(self.subnet_dict, [int(ip_version), int(mask), prange, masked_ip, 'ingress'], ingress)
-
+            self.subnet_dict[int(ip_version)][int(mask)][prange]['last_seen'] = int(last_seen)
+            self.subnet_dict[int(ip_version)][int(mask)][prange]['ingress'] = ingress
+            
         else: # 2) there is already a prevalent link
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['total'] +=1 # increment totals
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['prevalent_last_seen'] = int(last_seen)
@@ -666,12 +664,12 @@ class IPD:
         ## here we have to distinguish between
         #       already classified prefixes -> decrement function
 
-        for path, ts in dp.search(self.subnet_dict, "**/prevalent_last_seen", yielded=True):
+        for path, ts in dp.search(self.subnet_dict, "*/*/*/prevalent_last_seen", yielded=True):
             self.__decay_counter(current_ts=current_ts, path=path, last_seen=ts, method=self.decay_method)
 
 
         ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones
-        for path, ts in dp.search(self.subnet_dict, "**/last_seen",yielded=True):
+        for path, ts in dp.search(self.subnet_dict, "*/*/*/*/last_seen",yielded=True):
             # print(path, ts)
             # age=
             if int(ts)  < current_ts - self.e :
@@ -688,7 +686,6 @@ class IPD:
                 prange=path_elems[2]
                 ip=path_elems[3]
 
-                #dp.delete(self.subnet_dict, path.replace("/last_seen", "")) # too slow
                 self.subnet_dict[ip_version][mask][prange].pop(ip)
 
             except:
@@ -710,7 +707,7 @@ class IPD:
             # Needs to be a bytestring in Python 3
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
                 #encode.write("test")
-                for p, i in dp.search(self.subnet_dict, "**/prevalent", yielded=True):
+                for p, i in dp.search(self.subnet_dict, "*/*/*/prevalent", yielded=True):
                 #ipd_writer.write(b"I'm a log message.\n")
                     #if DEBUG:
                     self.logger.debug("{} {}".format(p,i))
@@ -719,8 +716,8 @@ class IPD:
                     min_samples=self.__get_min_samples(p)
                     p= p.replace("/prevalent", "")
                     #match_samples=int(dp.get(self.subnet_dict, f"{p}/match"))
-                    miss_samples= int(dp.get(self.subnet_dict, f"{p}/miss"))
-                    total_samples= int(dp.get(self.subnet_dict, f"{p}/total"))
+                    miss_samples = self.subnet_dict[ip_version][mask][prange].get('miss', None)
+                    total_samples =self.subnet_dict[ip_version][mask][prange].get('total', None)
 
                     ratio= 1-(miss_samples / total_samples)
 
@@ -883,7 +880,10 @@ if __name__ == '__main__':
 
     params = namedtuple('params', ['t','b',  'e', 'q', 'c4', 'c6', 'cidrmax4', 'cidrmax6', 'decay', 'loglevel'])
 
-    param_list=[
+    if TEST:
+        do_it(params(t, b, 120, 0.95, 64, 24,28, 48, 'default', logging.INFO))
+    else:
+        param_list=[
             # default case c4= 64, c6=24
             params(t, b, 120, 0.95, 64, 24,28, 48, 'default', logging.INFO),
             
@@ -927,13 +927,13 @@ if __name__ == '__main__':
             params(t, b, 120, 0.95, 4, 1,28, 48, 'stefan', logging.INFO),
             ]   
  
-    pool = Pool(processes=PROCS)
+        pool = Pool(processes=PROCS)
 
 
-    res= pool.imap(do_it, param_list)
+        res= pool.imap(do_it, param_list)
 
-    for a in res:
-        print("a, ", a)
+        for a in res:
+            print("a, ", a)
 
-    pool.close()
-    pool.join()
+        pool.close()
+        pool.join()

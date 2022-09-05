@@ -15,7 +15,7 @@ import logging
 from multiprocessing import Pool
 from tqdm import tqdm
 import datetime
-
+TEST=True
 PROCS = 90
 decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
@@ -27,8 +27,8 @@ bucket_output = 5*t
 b= 0.05         # allowed delta between bundle load
 
 input_path="/data/fast/mehner/ipd/netflow_merged_sorted"
-gzfiles=["@000000000000001605556860.gz", "@000000000000001605560460.gz", "@000000000000001605564060.gz", "@000000000000001605567660.gz", "@000000000000001605571260.gz", "@000000000000001605574860.gz", "@000000000000001605578460.gz", "@000000000000001605582060.gz", "@000000000000001605585660.gz", "@000000000000001605589260.gz", "@000000000000001605592860.gz", "@000000000000001605596460.gz", "@000000000000001605600060.gz", "@000000000000001605603660.gz", "@000000000000001605607260.gz", "@000000000000001605610860.gz", "@000000000000001605614460.gz", "@000000000000001605618060.gz", "@000000000000001605621660.gz", "@000000000000001605625260.gz", "@000000000000001605628860.gz", "@000000000000001605632460.gz", "@000000000000001605636060.gz", "@000000000000001605639660.gz", "@000000000000001605643260.gz"]
-#gzfiles=["nf_test.gz"]
+#gzfiles=["@000000000000001605556860.gz", "@000000000000001605560460.gz", "@000000000000001605564060.gz", "@000000000000001605567660.gz", "@000000000000001605571260.gz", "@000000000000001605574860.gz", "@000000000000001605578460.gz", "@000000000000001605582060.gz", "@000000000000001605585660.gz", "@000000000000001605589260.gz", "@000000000000001605592860.gz", "@000000000000001605596460.gz", "@000000000000001605600060.gz", "@000000000000001605603660.gz", "@000000000000001605607260.gz", "@000000000000001605610860.gz", "@000000000000001605614460.gz", "@000000000000001605618060.gz", "@000000000000001605621660.gz", "@000000000000001605625260.gz", "@000000000000001605628860.gz", "@000000000000001605632460.gz", "@000000000000001605636060.gz", "@000000000000001605639660.gz", "@000000000000001605643260.gz"]
+gzfiles=["nf_test10000000.gz"]
 cols=['tag', 'peer_src_ip', 'in_iface', 'out_iface', 'src_ip', 'dst_net', 'src_port', 'dst_port', 'proto', '__', '_', 'ts_start', 'ts_end', 'pkts', 'bytes']
 
 # netflow_path="/data/slow/mehner/netflow/dummy_netflow.gz"
@@ -112,6 +112,9 @@ class IPD:
             6: params.c6
         }
 
+        self.output_folder=f"results/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        os.makedirs(self.output_folder, exist_ok=True)
+
         ############################################
         ########### LOGGER CONFIGURATION ###########
         ############################################
@@ -156,9 +159,8 @@ class IPD:
 
 
     def __get_min_samples(self, path, decrement=False):
-            t = path.split("/")
-            ip_version = int(t[0])
-            cidr = int(t[1])
+            
+            ip_version, mask, prange= path
 
             if decrement:
                 cc= self.c[ip_version] * 0.001 # take 1% of min_samples as decrement base
@@ -168,16 +170,14 @@ class IPD:
             ipv_max = 32
             if ip_version == 6:
                 ipv_max = 64
-            min_samples=int(cc * math.sqrt( math.pow(2, (ipv_max - cidr))))
+            min_samples=int(cc * math.sqrt( math.pow(2, (ipv_max - mask))))
 
             # self.logger.info(f"min samples: {min_samples}")
             return min_samples
 
     def __split_ip_and_mask(self, prefix):
         # prefix should be in this format 123.123.123.123/12 or 2001:db8:abcd:0012::0/64
-
-        ip = prefix.split("/")[0]
-        mask = prefix.split("/")[1]
+        ip, mask = prefix.split("/")
 
         return str(ip), int(mask)
 
@@ -186,13 +186,13 @@ class IPD:
 
         prange, mask = range_string.split("/")
 
-        return f"{ip_version}/{mask}/{prange}"
+        #return f"{ip_version}/{mask}/{prange}"
+        return (ip_version, int(mask), prange)
 
     def __convert_range_path_to_single_elems(self, path):
-        t = path.split("/")
-        ip_version = int(t[0])
-        mask = int(t[1])
-        prange= t[2]
+        ip_version= path[0]
+        mask = path[1]
+        prange = path[2]
         return ip_version, mask, prange
 
     def __sort_dict(self, dict_to_sort):
@@ -228,13 +228,13 @@ class IPD:
 
         self.logger.info(f"  > Check if enough samples have been collected (s_ipcount >= n_cidr ) {prange}   s_ipcount={sample_count} min_samples={min_samples}")
         if sample_count >= min_samples:
-            # print("    YES → is a single color prevalent ? (s_color >=q)")
             return True
         else:
             return False
 
     # if raw=True: return not prevalent ingress, but dict with counters for all found routers
     def get_prevalent_ingress(self, path, raw=False):
+        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
 
         cur_prevalent=None
         ratio= -1
@@ -244,7 +244,7 @@ class IPD:
         counter_dict=defaultdict(int)
         result_dict={}
 
-        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
+        
         p_ingress = self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get('prevalent', None)
         p_total = self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get('total', None)
         p_miss = self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get('miss', None)
@@ -270,8 +270,7 @@ class IPD:
 
 
         else:
-            search_path="{}/**/ingress".format(path)
-            for p, v in dp.search(self.subnet_dict, search_path, yielded=True):
+            for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
                 counter_dict[v]+=1
 
             # is single ingress prevalent?
@@ -344,7 +343,7 @@ class IPD:
         #   not classified ranges = add IPs
         #
 
-        #dp.search(self.subnet_dict, f"{path}/**/ingress") # smehner removed
+
         match=0
         if type(ingress) == list: # handle bundle
             # count matches for that ingress'es
@@ -354,7 +353,7 @@ class IPD:
             # bundle_name+=")"
 
             tmp_dict=defaultdict(int)
-            for p,v in dp.search(self.subnet_dict, f"{path}/**/ingress", yielded=True):
+            for p,v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
                 if v in ingress:
                     tmp_dict[v] +=1
                     match +=1
@@ -366,7 +365,7 @@ class IPD:
 
         else: # handle single ingress link
 
-            for p,v in dp.search(self.subnet_dict, f"{path}/**/ingress", yielded=True):
+            for p,v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
                 if v == ingress: match += 1
 
 
@@ -374,10 +373,10 @@ class IPD:
 
         last_seen=0
         try:   
-            last_seen = max(dp.search(self.subnet_dict, f"{path}/**/last_seen", yielded=True))[1]
+            last_seen = max(dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/last_seen", yielded=True))[1]
         except:
-            logging.critical("last_seen not avaliable: {}".format(dp.get(self.subnet_dict, f"{path}")))
-
+            logging.critical("last_seen not avaliable: {}".format(dp.get(self.subnet_dict, f"{ip_version}/{mask}{prange}")))
+                    
 
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
 
@@ -385,12 +384,11 @@ class IPD:
 
         self.logger.debug(f" remove state for {len(pr)} IPs")
         miss = sample_count-match
-        dp.new(self.subnet_dict, f"{path}/prevalent", ingress)
-        # TODO prevalent_
-        dp.new(self.subnet_dict, f"{path}/total", sample_count)
-        # dp.new(self.subnet_dict, f"{path}/match", match)
-        dp.new(self.subnet_dict, f"{path}/miss", miss)
-        dp.new(self.subnet_dict, f"{path}/prevalent_last_seen", last_seen)
+
+        self.subnet_dict[ip_version][mask][prange]['prevalent'] = ingress
+        self.subnet_dict[ip_version][mask][prange]['total'] = sample_count
+        self.subnet_dict[ip_version][mask][prange]['miss'] = miss
+        self.subnet_dict[ip_version][mask][prange]['prevalent_last_seen'] = last_seen
 
 
         #if DEBUG:
@@ -406,7 +404,7 @@ class IPD:
         check_list=[]
         buffer_dict={}
 
-        currently_prevalent_ingresses = dp.search(self.subnet_dict, "**/prevalent", yielded=True)
+        currently_prevalent_ingresses = dp.search(self.subnet_dict, "*/*/*/prevalent", yielded=True)
 
         # prepare inital list
         for p,v in currently_prevalent_ingresses:
@@ -462,8 +460,7 @@ class IPD:
 
         nw= IPNetwork(f"{prange}/{mask}")
 
-        # ip_version = str()
-        #print(f"nw: {nw}")
+
         # add range to pytrcia tree and remove supernet
         info_txt=f"          split {prange}/{mask} into"
         for splitted_nw in nw.subnet(mask+1):
@@ -478,7 +475,7 @@ class IPD:
 
         # now split self.subnet_dict with all IPs
         change_list=[]
-        for p,v  in dp.search(self.subnet_dict, f"{path}/*", yielded=True): change_list.append((p,v))
+        for p,v  in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*", yielded=True): change_list.append((p,v))
 
         self.logger.debug("        #items {}; first 3 elems: {}".format(len(change_list), change_list[:3]))
         self.subnet_dict[ip_version][mask].pop(prange)
@@ -543,8 +540,7 @@ class IPD:
             for x in  [i for i in sibling_dict.keys() if bundle_indicator in i]:
                 sibling_dict.update(self.bundle_dict.get(x))
                 sibling_dict.pop(x)
-                #print("update ", bundle_dict.get(x))
-                #print("pop ", x)
+            
                 # now we have a dict with all ingress links separately
                 # e.g. {'miss': 32, 'VIE-SB5.12': 61000, 'VIE-SB5.10': 61571}
 
@@ -612,8 +608,9 @@ class IPD:
         p_ingress=self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{}).get('prevalent', None)
 
         if p_ingress==None: # 1) no prevalent ingress found for that range
-            dp.new(self.subnet_dict, [int(ip_version), int(mask), prange, masked_ip, 'last_seen'], int(last_seen))
-            dp.new(self.subnet_dict, [int(ip_version), int(mask), prange, masked_ip, 'ingress'], ingress)
+            
+            self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['last_seen'] = int(last_seen)
+            self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'] = ingress
 
         else: # 2) there is already a prevalent link
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['total'] +=1 # increment totals
@@ -694,14 +691,12 @@ class IPD:
         ## here we have to distinguish between
         #       already classified prefixes -> decrement function
 
-        for path, ts in dp.search(self.subnet_dict, "**/prevalent_last_seen", yielded=True):
+        for path, ts in dp.search(self.subnet_dict, "*/*/*/prevalent_last_seen", yielded=True):
             self.__decay_counter(current_ts=current_ts, path=path, last_seen=ts, method=self.decay_method)
 
 
         ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones
-        for path, ts in dp.search(self.subnet_dict, "**/last_seen",yielded=True):
-            # print(path, ts)
-            # age=
+        for path, ts in dp.search(self.subnet_dict, "*/*/*/*/last_seen",yielded=True):
             if int(ts)  < current_ts - self.e :
                 # self.logger.info("remove old ip: {} ({})".format(path, ts))
                 pop_list.append(path)
@@ -716,7 +711,7 @@ class IPD:
                 prange=path_elems[2]
                 ip=path_elems[3]
 
-                #dp.delete(self.subnet_dict, path.replace("/last_seen", "")) # too slow
+
                 self.subnet_dict[ip_version][mask][prange].pop(ip)
 
             except:
@@ -729,26 +724,24 @@ class IPD:
         # this should be the output format
         # only dump prevalent ingresses here
         #
-        output_file=f"results/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        os.makedirs(output_file, exist_ok=True)
-        output_file += f"/range.{current_ts}.gz"
+        
+        output_file = f"{self.output_folder}/range.{current_ts}.gz"
 
         self.logger.info(f"dump to file: {output_file}")
         with gzip.open(output_file, 'wb') as ipd_writer:
             # Needs to be a bytestring in Python 3
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
                 #encode.write("test")
-                for p, i in dp.search(self.subnet_dict, "**/prevalent", yielded=True):
+                for p, i in dp.search(self.subnet_dict, f"*/*/*/prevalent", yielded=True):
                 #ipd_writer.write(b"I'm a log message.\n")
                     #if DEBUG:
                     self.logger.debug("{} {}".format(p,i))
 
                     ip_version, mask, prange = self.__convert_range_path_to_single_elems(p)
                     min_samples=self.__get_min_samples(p)
-                    p= p.replace("/prevalent", "")
-                    #match_samples=int(dp.get(self.subnet_dict, f"{p}/match"))
-                    miss_samples= int(dp.get(self.subnet_dict, f"{p}/miss"))
-                    total_samples= int(dp.get(self.subnet_dict, f"{p}/total"))
+                    
+                    miss_samples = int(self.subnet_dict[ip_version][mask][prange]['miss'])
+                    total_samples = int(self.subnet_dict[ip_version][mask][prange]['total'])
 
                     ratio= 1-(miss_samples / total_samples)
 
@@ -764,7 +757,7 @@ class IPD:
         buffer_dict={}
 
         for current_range in list(self.range_lookup_dict[4]) + list(self.range_lookup_dict[6]):
-            check_list.append( self.__convert_range_string_to_range_path(current_range))
+            check_list.append( self.__convert_range_string_to_range_path(current_range)) # TODO
 
         while len(check_list) > 0:
             current_range_path = check_list.pop()
@@ -815,7 +808,7 @@ class IPD:
             self.dump_to_file(current_ts)
 
         self.logger.debug("bundles: ", self.bundle_dict)
-        self.logger.info(".............Finished.............\n\n")
+        self.logger.info(".............Finished.............")
 
     def run(self):
         
@@ -831,28 +824,22 @@ class IPD:
             ingress= nf_row[1]
             src_ip = nf_row[2]
 
+            # add data for next t seconds
+            self.add_to_subnet(last_seen=cur_ts, ingress=ingress, ip=src_ip)
+            add_counter+=1
+
             # initial set current ts
             if last_ts == None:  last_ts = cur_ts
 
             # next epoch?
             if cur_ts > last_ts: 
-                self.logger.info(f"added: {add_counter} flows for {cur_ts}")
-                print(f"added: {add_counter} flows for {cur_ts}")
-            
-                last_ts = cur_ts # next epoch
+                self.logger.info(f"added: {add_counter} flows for {last_ts}")
+                print(f"{self.output_folder} added: {add_counter} flows for {last_ts}")
                 add_counter=0
 
-                
+                self.run_ipd(last_ts)
 
-
-
-            # add data for next t seconds
-            self.add_to_subnet(last_seen=cur_ts, ingress=ingress, ip=src_ip)
-            add_counter+=1
-
-        # run in separate thread
-        self.run_ipd(cur_ts)
-
+                last_ts = cur_ts # next epoch
 
     def read_next_netflow(self):
 
@@ -871,7 +858,6 @@ class IPD:
                     if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
                     src_ip = line[4]    
                     cur_ts = int(int(line[-3]) / self.t) * self.t
-                    #print(cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
                     yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
 
 def do_it(params):
@@ -889,44 +875,48 @@ if __name__ == '__main__':
     
     # params(dataset, 60, 0.05, 120, 0.95, 64, 24,28, 48, 'default', logging.INFO)
     
-    param_list=[
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
-        # e
-        params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+    if TEST:
+        do_it(params(dataset, 60, 0.05, 120, 0.951, 0.0000064, 24, 28, 48, 'default', logging.INFO))
+    else:
 
-        # decay
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'none', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'linear', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'stefan', logging.INFO),
+        param_list=[
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+            # e
+            params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
 
-        # q
-        params(dataset, 60, 0.05, 120, 0.90, 64, 24, 28, 48, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.80, 64, 24, 28, 48, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.51, 64, 24, 28, 48, 'default', logging.INFO),
+            # decay
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'none', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'linear', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'stefan', logging.INFO),
 
-        # c 
-        params(dataset, 60, 0.05, 120, 0.95, 32, 12,28, 48, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.95, 4, 1, 28, 48, 'default', logging.INFO),
+            # q
+            params(dataset, 60, 0.05, 120, 0.90, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.80, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.51, 64, 24, 28, 48, 'default', logging.INFO),
 
-        # cidrmax
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24,24, 44, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24,20, 40, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 120, 0.95, 64, 24,30, 50, 'default', logging.INFO),
-        
-        # easy
-        params(dataset, 60, 0.05, 300, 0.80, 4, 1, 28, 48, 'default', logging.INFO),
-        params(dataset, 60, 0.05, 300, 0.80, 8, 2, 28, 48, 'none', logging.INFO),
+            # c 
+            params(dataset, 60, 0.05, 120, 0.95, 32, 12,28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 4, 1, 28, 48, 'default', logging.INFO),
 
-        ]
-    # do_it(param_list[0])
-    pool = Pool(processes=PROCS)
-    res= pool.imap(do_it, param_list)
+            # cidrmax
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,24, 44, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,20, 40, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,30, 50, 'default', logging.INFO),
+            
+            # easy
+            params(dataset, 60, 0.05, 300, 0.80, 4, 1, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 300, 0.80, 8, 2, 28, 48, 'none', logging.INFO),
+
+            ]
+        # do_it(param_list[0])
+        pool = Pool(processes=PROCS)
+        res= pool.imap(do_it, param_list)
 
 
-    for a in res:
-        print("a, ", a)
+        for a in res:
+            print("a, ", a)
 
 
-    pool.close()
-    pool.join()
+        pool.close()
+        pool.join()

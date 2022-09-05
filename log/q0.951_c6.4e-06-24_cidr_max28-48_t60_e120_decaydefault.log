@@ -1,0 +1,36 @@
+05-Sep-22 18:10:01 INFO run added: 66742 flows for 1605556680
+05-Sep-22 18:10:01 INFO remove_old_ips_from_range   > remove IPs older than 120 seconds
+05-Sep-22 18:10:02 INFO remove_old_ips_from_range     removing 0 expired IP addresses
+05-Sep-22 18:10:02 INFO is_prevalent_ingress_still_valid   > Prevalent color still valid (s_color >= q)
+05-Sep-22 18:10:02 INFO run_ipd    current_range: (6, 0, '::')
+05-Sep-22 18:10:02 WARNING get_sample_count  key (6, 0, '::') does not exist
+05-Sep-22 18:10:02 INFO run_ipd skip this range since there is nothing to do here
+05-Sep-22 18:10:02 INFO run_ipd    current_range: (4, 0, '0.0.0.0')
+05-Sep-22 18:10:02 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) (4, 0, '0.0.0.0')   s_ipcount=14760 min_samples=0
+05-Sep-22 18:10:02 INFO get_prevalent_ingress         no prevalent ingress found: {'VIE-SB5.1507': 0.559, 'VIE-SB5.17': 0.42, 'VIE-SB5.1493': 0.016, 'VIE-SB5.20': 0.004, 'VIE-SB5.25': 0.001, 'VIE-SB5.18': 0.0}
+05-Sep-22 18:10:02 INFO get_prevalent_ingress         prevalent for (4, 0, '0.0.0.0'): None (-1.00)
+05-Sep-22 18:10:02 INFO run_ipd         NO -> split subnet
+05-Sep-22 18:10:02 INFO split_range           split 0.0.0.0/0 into 0.0.0.0/1 and 128.0.0.0/1
+05-Sep-22 18:10:03 INFO run_ipd .............Finished.............
+05-Sep-22 18:10:24 INFO run added: 375889 flows for 1605556740
+05-Sep-22 18:10:24 INFO remove_old_ips_from_range   > remove IPs older than 120 seconds
+05-Sep-22 18:10:27 INFO remove_old_ips_from_range     removing 0 expired IP addresses
+05-Sep-22 18:10:27 INFO is_prevalent_ingress_still_valid   > Prevalent color still valid (s_color >= q)
+05-Sep-22 18:10:28 INFO run_ipd    current_range: (6, 0, '::')
+05-Sep-22 18:10:28 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) (6, 0, '::')   s_ipcount=2390 min_samples=103079215104
+05-Sep-22 18:10:28 INFO run_ipd       NO -> join siblings
+05-Sep-22 18:10:28 INFO join_siblings         join siblings for range (6, 0, '::')
+05-Sep-22 18:10:28 INFO join_siblings         join siblings not possible - we are at the root of the tree
+05-Sep-22 18:10:28 INFO run_ipd    current_range: (4, 1, '128.0.0.0')
+05-Sep-22 18:10:28 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) (4, 1, '128.0.0.0')   s_ipcount=18367 min_samples=0
+05-Sep-22 18:10:30 INFO get_prevalent_ingress         no prevalent ingress found: {'VIE-SB5.1507': 0.394, 'VIE-SB5.17': 0.371, 'VIE-SB5.1530': 0.085, 'LON-SB2.13': 0.057, 'VIE-SB5.21': 0.02, 'VIE-SB5.1522': 0.016, 'LON-SB2.12': 0.015, 'LON-SB2.10': 0.014, 'LON-SB2.11': 0.012, 'LON-SB2.345': 0.009, 'VIE-SB5.20': 0.003, 'VIE-SB5.19': 0.001, 'LON-SB2.9': 0.001, 'LON-SB2.398': 0.001, 'VIE-SB5.25': 0.0, 'VIE-SB5.1493': 0.0, 'LON-SB2.353': 0.0, 'LON-SB2.354': 0.0}
+05-Sep-22 18:10:30 INFO get_prevalent_ingress         prevalent for (4, 1, '128.0.0.0'): None (-1.00)
+05-Sep-22 18:10:30 INFO run_ipd         NO -> split subnet
+05-Sep-22 18:10:30 INFO split_range           split 128.0.0.0/1 into 128.0.0.0/2 and 192.0.0.0/2
+05-Sep-22 18:10:32 INFO run_ipd    current_range: (4, 1, '0.0.0.0')
+05-Sep-22 18:10:32 INFO check_if_enough_samples_have_been_collected   > Check if enough samples have been collected (s_ipcount >= n_cidr ) (4, 1, '0.0.0.0')   s_ipcount=43134 min_samples=0
+05-Sep-22 18:10:33 INFO get_prevalent_ingress         no prevalent ingress found: {'VIE-SB5.1507': 0.429, 'VIE-SB5.17': 0.373, 'LON-SB2.13': 0.079, 'VIE-SB5.1530': 0.063, 'VIE-SB5.1522': 0.01, 'LON-SB2.345': 0.009, 'VIE-SB5.1493': 0.008, 'LON-SB2.12': 0.007, 'LON-SB2.11': 0.006, 'VIE-SB5.21': 0.006, 'LON-SB2.10': 0.005, 'LON-SB2.398': 0.002, 'LON-SB2.342': 0.001, 'VIE-SB5.25': 0.0, 'VIE-SB5.1571': 0.0, 'VIE-SB5.18': 0.0, 'VIE-SB5.19': 0.0, 'VIE-SB5.20': 0.0, 'LON-SB2.9': 0.0, 'LON-SB2.347': 0.0, 'VIE-SB5.22': 0.0}
+05-Sep-22 18:10:33 INFO get_prevalent_ingress         prevalent for (4, 1, '0.0.0.0'): None (-1.00)
+05-Sep-22 18:10:33 INFO run_ipd         NO -> split subnet
+05-Sep-22 18:10:33 INFO split_range           split 0.0.0.0/1 into 0.0.0.0/2 and 64.0.0.0/2
+05-Sep-22 18:10:36 INFO run_ipd .............Finished.............
