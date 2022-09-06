@@ -13,8 +13,9 @@ import os
 import argparse
 import logging
 from multiprocessing import Pool
-from tqdm import tqdm
+
 import datetime
+
 TEST=True
 PROCS = 90
 decay_ingmar_bucket_expire_keep_fraction=0.9
@@ -27,8 +28,10 @@ bucket_output = 5*t
 b= 0.05         # allowed delta between bundle load
 
 input_path="/data/fast/mehner/ipd/netflow_merged_sorted"
-#gzfiles=["@000000000000001605556860.gz", "@000000000000001605560460.gz", "@000000000000001605564060.gz", "@000000000000001605567660.gz", "@000000000000001605571260.gz", "@000000000000001605574860.gz", "@000000000000001605578460.gz", "@000000000000001605582060.gz", "@000000000000001605585660.gz", "@000000000000001605589260.gz", "@000000000000001605592860.gz", "@000000000000001605596460.gz", "@000000000000001605600060.gz", "@000000000000001605603660.gz", "@000000000000001605607260.gz", "@000000000000001605610860.gz", "@000000000000001605614460.gz", "@000000000000001605618060.gz", "@000000000000001605621660.gz", "@000000000000001605625260.gz", "@000000000000001605628860.gz", "@000000000000001605632460.gz", "@000000000000001605636060.gz", "@000000000000001605639660.gz", "@000000000000001605643260.gz"]
-gzfiles=["nf_test10000000.gz"]
+gzfiles=["@000000000000001605556860.gz", "@000000000000001605560460.gz", "@000000000000001605564060.gz", "@000000000000001605567660.gz", "@000000000000001605571260.gz", "@000000000000001605574860.gz", "@000000000000001605578460.gz", "@000000000000001605582060.gz", "@000000000000001605585660.gz", "@000000000000001605589260.gz", "@000000000000001605592860.gz", "@000000000000001605596460.gz", "@000000000000001605600060.gz", "@000000000000001605603660.gz", "@000000000000001605607260.gz", "@000000000000001605610860.gz", "@000000000000001605614460.gz", "@000000000000001605618060.gz", "@000000000000001605621660.gz", "@000000000000001605625260.gz", "@000000000000001605628860.gz", "@000000000000001605632460.gz", "@000000000000001605636060.gz", "@000000000000001605639660.gz", "@000000000000001605643260.gz"]
+if TEST: gzfiles=["nf_test1000000.gz"]#10000000
+
+
 cols=['tag', 'peer_src_ip', 'in_iface', 'out_iface', 'src_ip', 'dst_net', 'src_port', 'dst_port', 'proto', '__', '_', 'ts_start', 'ts_end', 'pkts', 'bytes']
 
 # netflow_path="/data/slow/mehner/netflow/dummy_netflow.gz"
@@ -113,18 +116,25 @@ class IPD:
         }
 
         self.output_folder=f"results/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        if TEST: self.output_folder +="_TEST"
         os.makedirs(self.output_folder, exist_ok=True)
 
         ############################################
         ########### LOGGER CONFIGURATION ###########
         ############################################
+
+        ll = params.loglevel
+        if TEST: ll=logging.DEBUG
         os.makedirs("log", exist_ok=True)
-        logfile=f"log/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}.log"
+        
+        logfile=f"log/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        if TEST: logfile += "_TEST"
+        logfile+=".log"
         logging.basicConfig(filename=logfile,
                         format='%(asctime)s %(levelname)s %(funcName)s %(message)s',
                         datefmt='%d-%b-%y %H:%M:%S',
                         filemode='w',
-                        level=params.loglevel)
+                        level=ll)
 
         # Creating an object
         self.logger = logging.getLogger()
@@ -204,13 +214,13 @@ class IPD:
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
         self.logger.debug(path)
         # matc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}).get('match', -1)
-        count = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}).get('total', -1)
+        count = self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}).get('total', -1)
         # misc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}).get('miss', -1)
 
         if count < 0:
 
             # if no prevalent ingress exists, count all items
-            count= len(self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}))
+            count= len(self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}))
 
             if count <=0:
                 self.logger.warning(f" key {path} does not exist")
@@ -603,7 +613,7 @@ class IPD:
         masked_ip = self.mask_ip(ip)
         prange, mask = self.__split_ip_and_mask(self.get_corresponding_range(masked_ip))
 
-
+        self.logger.debug(f"add flow {ip}, {ingress}, {last_seen} --> {ip_version}, {mask}, {masked_ip} --> {self.get_corresponding_range(masked_ip)}")
         # get current prev ingress if existing
         p_ingress=self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{}).get('prevalent', None)
 
@@ -611,18 +621,22 @@ class IPD:
             
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['last_seen'] = int(last_seen)
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'] = ingress
+            self.logger.debug(f"  not classified yet - {self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]}")
 
         else: # 2) there is already a prevalent link
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['total'] +=1 # increment totals
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['prevalent_last_seen'] = int(last_seen)
 
+            self.logger.debug(f"  already classified - {self.subnet_dict[int(ip_version)][int(mask)][prange]}")
             if (bundle_indicator in p_ingress) and (ingress in self.bundle_dict[p_ingress].keys()): # 2b) there is a prevalent bundle:
                     self.bundle_dict[p_ingress][ingress] +=1
+                    self.logger.debug(f"  already classified as bundle - {self.bundle_dict[p_ingress][ingress]}")
             elif ingress == p_ingress: # 2a) there is one single prevalent link
                 # do nothing since we already incremented totals
                 pass
             else:
                 self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['miss'] +=1
+                self.logger.debug("  already classified but ingress not correct - {}".format(self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})))
 
             
 
@@ -689,8 +703,8 @@ class IPD:
         pop_list=[]
 
         ## here we have to distinguish between
-        #       already classified prefixes -> decrement function
 
+        #       already classified prefixes -> decrement function
         for path, ts in dp.search(self.subnet_dict, "*/*/*/prevalent_last_seen", yielded=True):
             self.__decay_counter(current_ts=current_ts, path=path, last_seen=ts, method=self.decay_method)
 
@@ -807,7 +821,7 @@ class IPD:
         if current_ts % bucket_output == 0: # dump every 5 min to file
             self.dump_to_file(current_ts)
 
-        self.logger.debug("bundles: ", self.bundle_dict)
+        self.logger.debug("bundles: {}".format(self.bundle_dict) )
         self.logger.info(".............Finished.............")
 
     def run(self):
@@ -842,11 +856,12 @@ class IPD:
                 last_ts = cur_ts # next epoch
 
     def read_next_netflow(self):
-
+        total_counter=0
+        added_counter=0
         for gzfile in gzfiles:
             with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
-            
                 for line in f:
+                    total_counter+=1
                     line = line.decode('utf-8').split(",")
 
                     router_name = router_ip_lookup_dict.get(line[1])
@@ -858,7 +873,12 @@ class IPD:
                     if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
                     src_ip = line[4]    
                     cur_ts = int(int(line[-3]) / self.t) * self.t
+                    added_counter +=1
+                    self.logger.debug(f"{added_counter} / {total_counter}")
+
                     yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
+                    
+
 
 def do_it(params):
     ipd = IPD(params)
@@ -876,11 +896,14 @@ if __name__ == '__main__':
     # params(dataset, 60, 0.05, 120, 0.95, 64, 24,28, 48, 'default', logging.INFO)
     
     if TEST:
-        do_it(params(dataset, 60, 0.05, 120, 0.951, 0.0000064, 24, 28, 48, 'default', logging.INFO))
+        #do_it(params(dataset, 60, 0.05, 120, 0.951, 0.0000064, 24, 28, 48, 'default', logging.INFO))
+        do_it(params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO))
     else:
 
         param_list=[
+            # default 
             params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+
             # e
             params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
             params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
