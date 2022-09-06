@@ -16,7 +16,7 @@ from multiprocessing import Pool
 
 import datetime
 
-TEST=True
+TEST=False
 PROCS = 90
 decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
@@ -68,7 +68,7 @@ print(len(ingresslink_dict))
 class IPD:    
 
     def __subnet_atts(self):
-        return {'last_seen': 0,  'ingress' : ""}
+        return {'last_seen': 0,  'ingress' : "", "total" : 0}
 
     def __multi_dict(self, K, type):
         if K == 1:
@@ -124,7 +124,7 @@ class IPD:
         ############################################
 
         ll = params.loglevel
-        if TEST: ll=logging.DEBUG
+        #if TEST: ll=logging.DEBUG
         os.makedirs("log", exist_ok=True)
         
         logfile=f"log/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
@@ -220,7 +220,12 @@ class IPD:
         if count < 0:
 
             # if no prevalent ingress exists, count all items
-            count= len(self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}))
+            #count= len(self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {})) ### this only counts the masekd ips
+            count=0
+
+            for masked_ip in self.subnet_dict[ip_version][mask][prange]:
+                count+= self.subnet_dict[ip_version][mask][prange][masked_ip].get('total', 0)
+
 
             if count <=0:
                 self.logger.warning(f" key {path} does not exist")
@@ -621,6 +626,8 @@ class IPD:
             
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['last_seen'] = int(last_seen)
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'] = ingress
+            self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['total'] +=1
+
             self.logger.debug(f"  not classified yet - {self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]}")
 
         else: # 2) there is already a prevalent link
