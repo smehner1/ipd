@@ -16,7 +16,7 @@ from multiprocessing import Pool
 
 import datetime
 
-TEST=False
+TEST=True
 PROCS = 90
 decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
@@ -68,7 +68,7 @@ print(len(ingresslink_dict))
 class IPD:    
 
     def __subnet_atts(self):
-        return {'last_seen': 0,  'ingress' : "", "total" : 0}
+        return {'last_seen': 0,  'ingress' : defaultdict(int), "total" : 0}
 
     def __multi_dict(self, K, type):
         if K == 1:
@@ -224,10 +224,10 @@ class IPD:
             count=0
 
             for masked_ip in self.subnet_dict[ip_version][mask][prange]:
-                count+= self.subnet_dict[ip_version][mask][prange][masked_ip].get('total', 0)
+                count+= self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get(masked_ip, {}).get('total', 0)
 
 
-            if count <=0:
+            if count <=0 or count == {}:
                 self.logger.warning(f" key {path} does not exist")
                 return -1
 
@@ -283,10 +283,13 @@ class IPD:
                 self.logger.warning(f"        prevalent ingress {p_ingress} for {path} below threshold ({ratio})")
 
 
-
+        # not already classified
         else:
+            #for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
             for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
-                counter_dict[v]+=1
+                for elem in v: 
+                    counter_dict[elem]+=1
+
 
             # is single ingress prevalent?
 
@@ -496,7 +499,8 @@ class IPD:
         self.subnet_dict[ip_version][mask].pop(prange)
         for p,v in change_list:
             try:
-                self.add_to_subnet(ip= p.split("/")[3], ingress=v.get("ingress"), last_seen=v.get("last_seen"))
+                for ingre in v.get("ingress"):
+                    self.add_to_subnet(ip= p.split("/")[3], ingress=ingre, last_seen=v.get("last_seen"), i_count=v.get('ingress').get(ingre))
             except:
                 self.logger.warning(f"         splitting not possible: {p} {v}")
 
@@ -607,7 +611,7 @@ class IPD:
             return None
 
 
-    def add_to_subnet(self, ip, ingress, last_seen):
+    def add_to_subnet(self, ip, ingress, last_seen, i_count=1):
         # cases:
         #   1) no prevalent ingress for that range found -> add ip and last_seen timestamp
         #   2a) there is one single prevalent link:       -> increment total and increment miss if it is not the correct ingress
@@ -625,7 +629,7 @@ class IPD:
         if p_ingress==None: # 1) no prevalent ingress found for that range
             
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['last_seen'] = int(last_seen)
-            self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'] = ingress
+            self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'][ingress] += i_count
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['total'] +=1
 
             self.logger.debug(f"  not classified yet - {self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]}")
@@ -903,8 +907,8 @@ if __name__ == '__main__':
     # params(dataset, 60, 0.05, 120, 0.95, 64, 24,28, 48, 'default', logging.INFO)
     
     if TEST:
-        #do_it(params(dataset, 60, 0.05, 120, 0.951, 0.0000064, 24, 28, 48, 'default', logging.INFO))
-        do_it(params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO))
+        do_it(params(dataset, 10, 0.05, 120, 0.951, 0.0000064, 24, 28, 48, 'default', logging.INFO))
+        #do_it(params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO))
     else:
 
         param_list=[
