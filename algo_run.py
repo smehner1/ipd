@@ -174,7 +174,7 @@ class IPD:
 
     def __get_min_samples(self, path, decrement=False):
             
-            ip_version, mask, prange= path
+            ip_version, mask, prange= self.__convert_range_path_to_single_elems(path)
 
             if decrement:
                 cc= self.c[ip_version] * 0.001 # take 1% of min_samples as decrement base
@@ -200,13 +200,14 @@ class IPD:
 
         prange, mask = range_string.split("/")
 
-        #return f"{ip_version}/{mask}/{prange}"
-        return (ip_version, int(mask), prange)
+        return f"{ip_version}/{mask}/{prange}"
+        
 
     def __convert_range_path_to_single_elems(self, path):
-        ip_version= path[0]
-        mask = path[1]
-        prange = path[2]
+        x = path.split("/")
+        ip_version= x[0]
+        mask = x[1]
+        prange = x[2]
         return ip_version, mask, prange
 
     def __sort_dict(self, dict_to_sort):
@@ -374,7 +375,7 @@ class IPD:
         #   already classified ranges => increment counters for misses and matches; decrement by dec_function
         #   not classified ranges = add IPs
         #
-        ip_version, mask, prange = path
+        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
 
         match=0
         if type(ingress) == list: # handle bundle
@@ -426,7 +427,7 @@ class IPD:
             logging.critical("last_seen not avaliable: {}".format(dp.get(self.subnet_dict, f"{ip_version}/{mask}{prange}")))
                     
 
-        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
+        # ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
 
         pr = self.subnet_dict[ip_version][mask].pop(prange)
 
@@ -463,7 +464,7 @@ class IPD:
         check_list.sort()
         while len(check_list) > 0:
             current_prevalent_path = check_list.pop()
-            
+            ip_version, mask, prange = self.__convert_range_path_to_single_elems(current_prevalent_path)
 
             # if we have to handle a sibling where the other one already initiated join
             if  buffer_dict.get(current_prevalent_path,False):
@@ -472,16 +473,11 @@ class IPD:
 
             self.logger.debug(f"    checking {current_prevalent_path}")
 
-            x = current_prevalent_path.split("/") #self.__convert_range_path_to_single_elems(path)
-            ip_version= int(x[0])
-            mask= int(x[1])
-            prange= x[2]
-        
             current_prevalent = self.subnet_dict[ip_version][mask][prange]['prevalent']
 
             #current_prevalent= i
 
-            new_prevalent = self.get_prevalent_ingress((ip_version, mask, prange))
+            new_prevalent = self.get_prevalent_ingress(current_prevalent_path)
 
 
             # if new_prevalent is list and current_prevalent is bundle string, we split current_prevalent and compare list
@@ -638,10 +634,7 @@ class IPD:
             self.logger.debug("len now: {}".format(len(self.subnet_dict[ip_version][supernet_mask][supernet_ip].keys())))
 
             #       supernet add to list                          sibling that can be removed
-            return (ip_version,supernet_mask, supernet_ip), the_other_one
-            # pop_list=[]
-            # add_list=[]
-            # return f"{ip_version}/{supernet_mask}/{supernet_ip}", pop_list, add_list
+            return f"{ip_version}/{supernet_mask}/{supernet_ip}",the_other_one
 
         else:
             self.logger.info(" NO -> do nothing")
@@ -707,10 +700,8 @@ class IPD:
 
     def __decay_counter(self, current_ts, path, last_seen, method="none"): # default, linear, stefan
 
-        x = path.split("/") #self.__convert_range_path_to_single_elems(path)
-        ip_version= int(x[0])
-        mask= int(x[1])
-        prange= x[2]
+        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
+        
         
 
         self.logger.debug(f"{ip_version} {mask} {prange}")
@@ -823,10 +814,8 @@ class IPD:
                 #ipd_writer.write(b"I'm a log message.\n")
                     #if DEBUG:
                     self.logger.debug("{} {}".format(p,i))
-                    x = p.split("/") #self.__convert_range_path_to_single_elems(path)
-                    ip_version= int(x[0])
-                    mask= int(x[1])
-                    prange= x[2]
+                    
+                    ip_version, mask, prange = self.__convert_range_path_to_single_elems(p)
                     
                     self.__convert_range_path_to_single_elems(p)
                     min_samples=self.__get_min_samples(p)
