@@ -17,7 +17,7 @@ from multiprocessing import Pool
 import datetime
 
 TEST=False
-LPM_CACHE=False
+RESULT_PREFIX="_no_log"
 PROCS = 90
 decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
@@ -119,7 +119,7 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder=f"results/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.output_folder=f"results{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: self.output_folder +="_TEST"
         os.makedirs(self.output_folder, exist_ok=True)
 
@@ -128,10 +128,9 @@ class IPD:
         ############################################
 
         ll = params.loglevel
-        if TEST: ll=logging.DEBUG
-        os.makedirs("log", exist_ok=True)
-        
-        logfile=f"log/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        #if TEST: ll=logging.DEBUG
+        os.makedirs(f"log{RESULT_PREFIX}", exist_ok=True)
+        logfile=f"log{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
         logging.basicConfig(filename=logfile,
@@ -205,9 +204,9 @@ class IPD:
 
     def __convert_range_path_to_single_elems(self, path):
         x = path.split("/")
-        ip_version= x[0]
-        mask = x[1]
-        prange = x[2]
+        ip_version= int(x[0])
+        mask = int(x[1])
+        prange = str(x[2])
         return ip_version, mask, prange
 
     def __sort_dict(self, dict_to_sort):
@@ -217,7 +216,8 @@ class IPD:
     def get_sample_count(self, path):
         count=0
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
-        self.logger.debug(path)
+        self.logger.debug(f"{path} -> {ip_version}, {mask}, {prange}")
+
         # matc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}).get('match', -1)
         try:
             count = self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}).get('total', -1)
@@ -236,19 +236,20 @@ class IPD:
 
             if count <=0 or count == {}:
                 self.logger.warning(f" key {path} does not exist")
+                self.logger.debug(self.subnet_dict[ip_version][mask])
                 return -1
 
         return count
 
-    def check_if_enough_samples_have_been_collected(self, prange):
+    def check_if_enough_samples_have_been_collected(self, path):
         
-        sample_count = self.get_sample_count(prange)
+        sample_count = self.get_sample_count(path)
         if sample_count < 0: # if -1 -> key error
             return None
 
-        min_samples= self.__get_min_samples(prange)
+        min_samples= self.__get_min_samples(path)
 
-        self.logger.info(f"  > Check if enough samples have been collected (s_ipcount >= n_cidr ) {prange}   s_ipcount={sample_count} min_samples={min_samples}")
+        self.logger.info(f"  > Check if enough samples have been collected (s_ipcount >= n_cidr ) {path}   s_ipcount={sample_count} min_samples={min_samples}")
         if sample_count >= min_samples:
             return True
         else:
@@ -290,8 +291,7 @@ class IPD:
                 self.logger.warning(f"        prevalent ingress {p_ingress} for {path} below threshold ({ratio})")
 
 
-        # not already classified
-        # TODO GROSSE KACKEmn      
+        # not classified yet
         else:
             #for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
             for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
@@ -652,18 +652,7 @@ class IPD:
         masked_ip = self.mask_ip(ip)
 
         # cache lpm lookups for every t (self.range_lookup_cache_dict will be resetted in run() after ts is chcanging)
-        if LPM_CACHE:
-            x = self.range_lookup_cache_dict.get(ip_version, {}).get(masked_ip, False)
-            if x == False:
-                prange, mask = self.__split_ip_and_mask(self.get_corresponding_range(masked_ip))
-                self.range_lookup_cache_dict[ip_version][masked_ip] = (prange, mask )
-                self.logger.debug(f"cache added: {self.range_lookup_cache_dict[ip_version][masked_ip]}")
-            else:
-                self.logger.debug(f"cached: {x}")
-                prange, mask = x
-                self.cache_counter +=1
-        else: 
-            prange, mask = self.__split_ip_and_mask(self.get_corresponding_range(masked_ip))
+        prange, mask = self.__split_ip_and_mask(self.get_corresponding_range(masked_ip))
 
         self.logger.debug(f"add flow {ip}, {ingress}, {last_seen} --> {ip_version}, {mask}, {masked_ip} --> {self.get_corresponding_range(masked_ip)}")
         # get current prev ingress if existing
@@ -702,8 +691,6 @@ class IPD:
 
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
         
-        
-
         self.logger.debug(f"{ip_version} {mask} {prange}")
         # 4/2/64.0.0.0
 
@@ -945,7 +932,7 @@ class IPD:
                     src_ip = line[4]    
                     cur_ts = int(int(line[-3]) / self.t) * self.t
                     added_counter +=1
-                    self.logger.debug(f"{added_counter} / {total_counter}")
+
 
                     yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
                     
@@ -968,39 +955,39 @@ if __name__ == '__main__':
     
     if TEST:
         #do_it(params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO))
-        do_it(params(dataset, 20, 0.05, 120, 0.9501, 0.01, 0.01, 28, 48, 'default', logging.INFO))
+        do_it(params(dataset, 30, 0.05, 120, 0.9501, 0.01, 0.01, 28, 48, 'default', logging.DEBUG))
     else:
 
         param_list=[
             # default 
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.ERROR),
 
             # e
-            params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.ERROR),
 
             # decay
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'none', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'linear', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'stefan', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'none', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'linear', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'stefan', logging.ERROR),
 
             # q
-            params(dataset, 60, 0.05, 120, 0.90, 64, 24, 28, 48, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.80, 64, 24, 28, 48, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.51, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.90, 64, 24, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.80, 64, 24, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.51, 64, 24, 28, 48, 'default', logging.ERROR),
 
             # c 
-            params(dataset, 60, 0.05, 120, 0.95, 32, 12,28, 48, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.95, 4, 1, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 32, 12,28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 4, 1, 28, 48, 'default', logging.ERROR),
 
             # cidrmax
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24,24, 44, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24,20, 40, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24,30, 50, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,24, 44, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,20, 40, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,30, 50, 'default', logging.ERROR),
             
             # easy
-            params(dataset, 60, 0.05, 300, 0.80, 4, 1, 28, 48, 'default', logging.INFO),
-            params(dataset, 60, 0.05, 300, 0.80, 8, 2, 28, 48, 'none', logging.INFO),
+            params(dataset, 60, 0.05, 300, 0.80, 4, 1, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 300, 0.80, 8, 2, 28, 48, 'none', logging.ERROR),
 
             ]
         # do_it(param_list[0])
