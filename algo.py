@@ -17,8 +17,10 @@ import queue
 import datetime
 import time
 
-TEST=False
-RESULT_PREFIX=""
+TEST=True
+
+RESULT_PREFIX="DEBUG"
+
 IPD_IDLE_BEFORE_START=1
 PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
@@ -184,7 +186,7 @@ class IPD:
             ip_version, mask, prange= self.__convert_range_path_to_single_elems(path)
 
             if decrement:
-                cc= self.c[ip_version] * 0.001 # take 1% of min_samples as decrement base
+                cc= self.c[ip_version] * 0.001 # take 0.1% of min_samples as decrement baseline
             else:
                 cc = self.c[ip_version]
 
@@ -980,13 +982,11 @@ class IPD:
         print("finish read_netflow_worker ")
         self.read_data_finisehd=True
 
-
-
-def do_it(params):
-    ipd = IPD(params)
-    ipd.run()
-
+def do_it():
+        pass
 if __name__ == '__main__':   
+
+    
     params = namedtuple('params', ['d', 't','b',  'e', 'q', 'c4', 'c6', 'cidrmax4', 'cidrmax6', 'decay', 'loglevel'])
     parser = argparse.ArgumentParser()
 
@@ -1000,7 +1000,7 @@ if __name__ == '__main__':
     parser.add_argument('-cidrmax6', default=48, type=int)
     parser.add_argument('-d', default="/data/fast/mehner/ipd/netflow_merged_sorted", type=str) # netflow100000.csv netflow100000000.csv
     parser.add_argument('-decay', default="default", type=str)
-    parser.add_argument('-loglevel', default="info", type=int)
+    parser.add_argument('-loglevel', default=20, type=int)
 
     
     args = parser.parse_args()
@@ -1034,7 +1034,10 @@ if __name__ == '__main__':
     }
 
     if TEST:
-        #do_it(params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO))
-        do_it(params(dataset, 30, 0.05, 120, 0.9501, 32, 12, 28, 48, 'default', logging.DEBUG))
+        params = params(dataset, 30, 0.05, 120, 0.9501, 32, 12, 28, 48, 'default', logging.DEBUG)
+   
     else:
-        do_it(params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO))
+        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)
+
+    ipd = IPD(params)
+    ipd.run()
