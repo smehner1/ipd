@@ -1,0 +1,16 @@
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=30 -q=0.95 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=300 -q=0.95 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='none' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='linear' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='stefan' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.90 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.80 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.51 -c4=64 -c6=24 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=32 -c6=12 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=4 -c6=1 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=24 -cidrmax6=44 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=20 -cidrmax6=40 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=120 -q=0.95 -c4=64 -c6=24 -cidrmax4=30 -cidrmax6=50 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=300 -q=0.80 -c4=4 -c6=1 -cidrmax4=28 -cidrmax6=48 -decay='default' -loglevel=20
+/home/mehneste/pypy3.9-v7.3.9-linux64/bin/pypy algo.py -t=60 -e=300 -q=0.80 -c4=8 -c6=2 -cidrmax4=28 -cidrmax6=48 -decay='none' -loglevel=20

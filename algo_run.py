@@ -17,7 +17,7 @@ from multiprocessing import Pool
 import datetime
 
 TEST=False
-RESULT_PREFIX="_no_log"
+RESULT_PREFIX="_pypy"
 PROCS = 90
 decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
@@ -960,34 +960,34 @@ if __name__ == '__main__':
 
         param_list=[
             # default 
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
 
             # e
-            params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 30, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 300, 0.95, 64, 24, 28, 48, 'default', logging.INFO),
 
             # decay
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'none', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'linear', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'stefan', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'none', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'linear', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24, 28, 48, 'stefan', logging.INFO),
 
             # q
-            params(dataset, 60, 0.05, 120, 0.90, 64, 24, 28, 48, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.80, 64, 24, 28, 48, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.51, 64, 24, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.90, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.80, 64, 24, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.51, 64, 24, 28, 48, 'default', logging.INFO),
 
             # c 
-            params(dataset, 60, 0.05, 120, 0.95, 32, 12,28, 48, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.95, 4, 1, 28, 48, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 32, 12,28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 4, 1, 28, 48, 'default', logging.INFO),
 
             # cidrmax
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24,24, 44, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24,20, 40, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 120, 0.95, 64, 24,30, 50, 'default', logging.ERROR),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,24, 44, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,20, 40, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 120, 0.95, 64, 24,30, 50, 'default', logging.INFO),
             
             # easy
-            params(dataset, 60, 0.05, 300, 0.80, 4, 1, 28, 48, 'default', logging.ERROR),
-            params(dataset, 60, 0.05, 300, 0.80, 8, 2, 28, 48, 'none', logging.ERROR),
+            params(dataset, 60, 0.05, 300, 0.80, 4, 1, 28, 48, 'default', logging.INFO),
+            params(dataset, 60, 0.05, 300, 0.80, 8, 2, 28, 48, 'none', logging.INFO),
 
             ]
         # do_it(param_list[0])
