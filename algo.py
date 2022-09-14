@@ -1,5 +1,7 @@
 from ast import While
 from re import I
+from tabnanny import check
+from xml.sax.handler import property_lexical_handler
 import pandas as pd 
 import csv
 import gzip
@@ -106,12 +108,13 @@ class IPD:
 
         self.debug_flow_output_counter = 0
         self.netflow_data_queue= queue.Queue()
+        self.ipd_cache={}
         
         self.subnet_dict= self.__multi_dict(4, self.__subnet_atts)
 
         self.bundle_dict={}
         self.d = params.d
-        self.t = params.t #60 ### TODO ggf fix notwenig
+        self.t = params.t #60 
         self.e=  params.e #120
         self.q = params.q # 0.80
         self.decay_method=params.decay
@@ -228,22 +231,22 @@ class IPD:
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
         self.logger.debug(f"{path} -> {ip_version}, {mask}, {prange}")
 
-        # matc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}).get('match', -1)
+        # already classified
         try:
             count = self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}).get('total', -1)
         except ValueError:
             self.logger.critical(self.output_folder)
             self.logger.critical(f"mask: {mask}, ip_version: {ip_version}, prange: {prange}")
             exit(1)
-        if count < 0:
 
-            # if no prevalent ingress exists, count all items
-            #count= len(self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {})) ### this only counts the masekd ips
+        # if no prevalent ingress exists, count all items
+        if count < 0:
             count=0
 
             for masked_ip in self.subnet_dict[ip_version][mask][prange]:
                 count+= self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get(masked_ip, {}).get('total', 0)
-
+            
+            # TODO opt: add count to prange
             if count <=0 or count == {}:
                 self.logger.warning(f" key {path} does not exist")
                 self.logger.debug(self.subnet_dict[ip_version][mask])
@@ -255,6 +258,7 @@ class IPD:
         
         sample_count = self.get_sample_count(path)
         if sample_count < 0: # if -1 -> key error
+            self.logger.warning(f"key not found {path}")
             return None
 
         min_samples= self.__get_min_samples(path)
@@ -273,107 +277,153 @@ class IPD:
         ratio= -1
         sample_count= self.get_sample_count(path)
 
-        # calculate prevalent ingress
-        counter_dict=defaultdict(int)
-        result_dict={}
 
-        # try to access values for prevalent        
-        p_ingress = self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get('prevalent', None)
-        p_total = self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get('total', None)
-        p_miss = self.subnet_dict.get(ip_version, {}).get(mask, {}).get(prange, {}).get('miss', None)
+        # input: counter dict
+        # output: prevalent ingress or None
+        def __get_prev_ing(counter_dict):
+            total = sum(counter_dict.values())
+            for ingress in counter_dict.keys():
+                ratio = counter_dict[ingress]/total
+                if  ratio >= self.q: 
+                    self.logger.info("        prevalent for {}: {} ({:.2f})".format(path, ingress, ratio))
+                    return ingress
 
-        if p_ingress != None and p_total != None: # there is a prevalent ingress yet
-            if p_total < 1: 
-                pr = self.subnet_dict[ip_version][mask].pop(prange)
-                self.logger.warning(f"p_total < 1: {path} ingress:{p_ingress} total:{p_total} miss:{p_miss} - pop: {pr}")
-                
-                return None
+            self.logger.info(f"        prevalent for {path}: None (-1.00)")
+            return None
+            
+        def __get_shares(counter_dict):
+            total = sum(counter_dict.values())
+            tmp_dict={}
+            for ingress in counter_dict.keys():
+                ratio = counter_dict.get(ingress) / total
+                tmp_dict[ingress] = round(ratio,3)
 
-            ratio = 1- (p_miss / p_total)
+            return self.__sort_dict(tmp_dict)
+            # there was no prevalent
 
-            if raw:
-                return {p_ingress : (p_total-p_miss), 'miss' : p_miss} # TODO total or matches ?
+        # something like this:
+        # defaultdict(int,
+        # {'VIE-SB5.1507': 5,
+        # 'VIE-SB5.1530': 6,
+        # 'VIE-SB5.10': 1,
+        # 'VIE-SB5.12': 1,
+        # 'VIE-SB5.26': 1})
+        counter_dict = self.subnet_dict[ip_version][mask][prange].get('cache', defaultdict(int))
+        
+        # use cached data
+        if len(counter_dict) >0:
+            # if > 0 then we have data
+            if raw: return counter_dict
 
-            if ratio >= self.q:
-                self.logger.debug(f"        already classified: {p_ingress}: ({ratio:.2f})")
-                cur_prevalent=p_ingress
+            return (__get_prev_ing(counter_dict))
+            
+        else: # calculate everything from new
+
+            result_dict={}
+            
+            p_ingress = self.subnet_dict[ip_version][mask][prange].get('prevalent', None)
+            p_total   = self.subnet_dict[ip_version][mask][prange].get('total', None)
+            p_miss    = self.subnet_dict[ip_version][mask][prange].get('miss', None)
+
+
+            # already classified
+            if p_ingress != None and p_total != None: # there is a prevalent ingress yet
+                if p_total < 1: 
+                    pr = self.subnet_dict[ip_version][mask].pop(prange)
+                    self.logger.warning(f"p_total < 1: {path} ingress:{p_ingress} total:{p_total} miss:{p_miss} - pop: {pr}")
+                    
+                    return None
+
+                ratio = 1- (p_miss / p_total)
+
+                counter_dict={p_ingress : (p_total-p_miss), 'miss' : p_miss} # TODO total or matches ?
+
+                res = __get_prev_ing(counter_dict)
+                if res == None:
+                    self.logger.warning(f"        prevalent ingress {p_ingress} for {path} below threshold ({ratio}) - pop it")
+                    # TODO remove path if it is not prevalent anymore
+                    self.subnet_dict[ip_version][mask].pop(prange)
+            
+            # not classified yet
             else:
-                self.logger.warning(f"        prevalent ingress {p_ingress} for {path} below threshold ({ratio})")
-                pass
+                # create counter_dict
+                
+                # get all masked ips for current range
+                masked_ips_list=self.subnet_dict[ip_version][mask][prange].keys()
+                
+                while masked_ips_list > 0:
+                    masked_ip = masked_ips_list.pop()
 
+                    # iterate over all found ingresses for masked ip -> fill counter_dict
+                    for ingress in self.subnet_dict[ip_version][mask][prange][masked_ip]['ingress'].keys():
+                        counter_dict[ingress] += self.subnet_dict[ip_version][mask][prange][masked_ip]['ingress'][ingress]
 
-        # not classified yet
-        else:
-            #for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
-            for p, v in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
-                for elem in v: 
-                    # for ingre in v.get("ingress"):
-                    counter_dict[elem] += v.get(elem)
-                    # print(counter_dict)
+                # is single ingress prevalent?    
+                cur_prevalent = __get_prev_ing(counter_dict)
+                if raw: return counter_dict
+                
 
-            su=0
-            for p in counter_dict:
-                su+= counter_dict.get(p)
+                # for ingress in counter_dict:
+                #     ratio = counter_dict.get(ingress) / sample_count
+                #     result_dict[ingress] = round(ratio,3)
 
-            # is single ingress prevalent?
-            for ingress in counter_dict:
-                ratio = counter_dict.get(ingress) / sample_count
-                result_dict[ingress] = round(ratio,3)
+                #     # self.logger.info("       ratio for {}: {:.2f}".format(ingress, ratio))
+                #     if ratio >= self.q:  # we found a prevalent ingress point!
+                #         cur_prevalent = ingress
+                #         if not raw: break
 
-                # self.logger.info("       ratio for {}: {:.2f}".format(ingress, ratio))
-                if ratio >= self.q:  # we found a prevalent ingress point!
-                    cur_prevalent = ingress
-                    if not raw: break
+                #     # TODO opt: add counter_dict and result_dict to prange
 
-            # check for bundles
-            if cur_prevalent == None: # if we still have not found an ingress, maybe we have a bundle here
-                bundle_candidates=set()
-                last_value=None
-                last_ingress=None
-                self.logger.debug(self.__sort_dict(result_dict))
-                for ingress in self.__sort_dict(result_dict):
-                    value = result_dict.get(ingress)
-                    if value < 0.1: break # since it is sorted; otherwise we should use continue here
+                # check for bundles
+                if cur_prevalent == None: # if we still have not found an ingress, maybe we have a bundle here
+                    bundle_candidates=set()
+                    last_value=None
+                    last_ingress=None
+                    result_dict = __get_shares(counter_dict)
+                    self.logger.debug(result_dict)
+                    for ingress in result_dict.keys():
+                        value = result_dict.get(ingress)
+                        if value < 0.1: break # since it is sorted; otherwise we should use continue here
 
-                    # first iteration
-                    if last_value == None:
+                        # first iteration
+                        if last_value == None:
+                            last_value = value
+                            last_ingress = ingress
+                            continue
+
+                        # 2nd ... nth iteration
+                        if value + b >= last_value:
+                                # check if there is the same router
+                                if ingress.split(".")[0] == last_ingress.split(".")[0]:
+                                    bundle_candidates.add(last_ingress)
+                                    bundle_candidates.add(ingress)
+
                         last_value = value
                         last_ingress = ingress
-                        continue
 
-                    # 2nd ... nth iteration
-                    if value + b >= last_value:
-                            # check if there is the same router
-                            if ingress.split(".")[0] == last_ingress.split(".")[0]:
-                                bundle_candidates.add(last_ingress)
-                                bundle_candidates.add(ingress)
+                    if len(bundle_candidates) > 0:
+                        self.logger.debug(f"bundle candidates: {bundle_candidates}")
+                        cum_ratio=0
+                        for i in bundle_candidates: cum_ratio += result_dict.get(i)
 
-                    last_value = value
-                    last_ingress = ingress
-
-                if len(bundle_candidates) > 0:
-                    self.logger.debug(f"bundle candidates: {bundle_candidates}")
-                    cum_ratio=0
-                    for i in bundle_candidates: cum_ratio += result_dict.get(i)
-
-                    if cum_ratio >= self.q:
-                        # if cum_ratio exceeds q, this will be a bundle
-                        cur_prevalent=list(bundle_candidates)
-                        ratio = cum_ratio
+                        if cum_ratio >= self.q:
+                            # if cum_ratio exceeds q, this will be a bundle
+                            cur_prevalent=list(bundle_candidates)
+                            ratio = cum_ratio
 
 
-            if raw:
-                self.logger.debug(f"counter_dict: {counter_dict}")
-                return counter_dict
+                if raw:
+                    self.logger.debug(f"counter_dict: {counter_dict}")
+                    return counter_dict
 
 
-        if cur_prevalent == None:
-            ratio = -1
-            self.logger.info("        no prevalent ingress found: {}".format(self.__sort_dict(result_dict)))
+            if cur_prevalent == None:
+                ratio = -1
+                self.logger.info("        no prevalent ingress found: {}".format(result_dict))
+            else:
+                self.logger.info("        prevalent for {}: {} ({:.2f})".format(path, cur_prevalent, ratio))
 
-        self.logger.info("        prevalent for {}: {} ({:.2f})".format(path, cur_prevalent, ratio))
-
-        return cur_prevalent
+            return cur_prevalent
 
     def set_prevalent_ingress(self, path, ingress):
         # if an ingress is prevalent we set a 'prevalent' attribute for this path
@@ -439,7 +489,7 @@ class IPD:
 
         pr = self.subnet_dict[ip_version][mask].pop(prange)
 
-        self.logger.debug(f" remove state for {len(pr)} IPs")
+        self.logger.info(f" remove state for {len(pr)} IPs")
         miss = sample_count-match
 
         self.subnet_dict[ip_version][mask][prange]['prevalent'] = ingress
@@ -458,13 +508,19 @@ class IPD:
 
 
     # iterates over all ranges that are already classified
-    def is_prevalent_ingress_still_valid(self ):
+    def is_prevalent_ingress_still_valid(self, path):
+
+        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
         self.logger.info("  > Prevalent color still valid (s_color >= q)")
 
         check_list=[]
         buffer_dict={}
 
-        currently_prevalent_ingresses = dp.search(self.subnet_dict, "*/*/*/prevalent", yielded=True)
+
+        
+        #currently_prevalent_ingresses = dp.search(self.subnet_dict, "*/*/*/prevalent", yielded=True)
+
+
 
         # prepare inital list
         for p,v in currently_prevalent_ingresses:
@@ -706,7 +762,7 @@ class IPD:
 
 
 
-    def __decay_counter(self, current_ts, path, last_seen, method="none"): # default, linear, stefan
+    def __decay_counter(self, current_ts, path, method="none"): # default, linear, stefan
 
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
         
@@ -715,10 +771,11 @@ class IPD:
         totc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['total']
         #matc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['match']
         misc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['miss']
+        last_seen = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['last_seen']
 
         age = (current_ts-self.e) - last_seen
 
-        # TODO decay from total
+
 
         self.logger.debug("total: {} miss: {} age:{}".format(totc,misc,age) )
         reduce = 0
@@ -765,43 +822,56 @@ class IPD:
         self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['miss'] =  int(misc)
 
     # remove all ips older than e seconds
-    def remove_old_ips_from_range(self, current_ts):
+    def remove_expired_ips_from_range(self, current_ts, path):
+        '''
+            check if there is the attribute 'prevalent_last_seen' 
+                -> Y: classified range: decay_counter method
+                -> N: iterate over all underlying (masked) IPs and check every single IP if it is expired
+                    (OPTIMIZATION: after removing the IPs, we calc current prevalent ingress and append it to the masked_ip as attribute)
+
+            there is only one for loop for the masked IPs for the current range
+        '''
+        
         self.logger.info(f"  > remove IPs older than {self.e} seconds")
-        pop_list=[]
-
+        ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
+        
         ## here we have to distinguish between
+        if self.subnet_dict[ip_version][mask][prange].get("prevalent_last_seen", None) != None:
+            
+            #       already classified prefixes -> decrement function
 
-        #       already classified prefixes -> decrement function
-        for path, ts in dp.search(self.subnet_dict, "*/*/*/prevalent_last_seen", yielded=True):
-            self.logger.debug(f"{path}, {ts}")
-            self.__decay_counter(current_ts=current_ts, path=path, last_seen=ts, method=self.decay_method)
+            self.logger.debug(f"decay {path}, {current_ts}")
+            self.__decay_counter(current_ts=current_ts, path=path, method=self.decay_method)
+            
+        else: 
+
+            ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones
+
+            pop_counter=0
+            check_list= list(self.subnet_dict[ip_version][mask][prange].keys())
+            
+            while len(check_list) >0: 
+
+                masked_ip = check_list.pop()
+
+                last_seen= self.subnet_dict[ip_version][mask][prange][masked_ip].get("last_seen", -1)
+                if last_seen < 0: 
+                    self.logger.warning(f"no last seen found -> {path}")
+                    continue
+                if last_seen  < current_ts - self.e :
+                    try: 
+                        self.subnet_dict[ip_version][mask][prange].pop(masked_ip)
+                        pop_counter +=1
+                    except:
+                        self.logger.warning("    ERROR: {} cannot be deleted".format(path))
+                        pass
+
+        
+            
+            self.logger.info(f"    {path}: {pop_counter} IPs expired")
 
 
-        ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones
-        for path, ts in dp.search(self.subnet_dict, "*/*/*/*/last_seen",yielded=True):
-            if int(ts)  < current_ts - self.e :
-                # self.logger.info("remove old ip: {} ({})".format(path, ts))
-                pop_list.append(path)
 
-        self.logger.info("    removing {} expired IP addresses".format(len(pop_list)))
-        # b= len(self.subnet_dict["4"]["0"]["0.0.0.0"])
-        for path in pop_list:
-            try:
-                path_elems= path.split("/")
-                ip_version=int(path_elems[0])
-                mask=int(path_elems[1])
-                prange=path_elems[2]
-                ip=path_elems[3]
-
-
-                self.subnet_dict[ip_version][mask][prange].pop(ip)
-
-            except:
-                self.logger.warning("    ERROR: {} cannot be deleted".format(path))
-                pass
-
-
-    # TODO  do not use triple but path again 
     def dump_to_file(self, current_ts):
         # this should be the output format
         # only dump prevalent ingresses here
@@ -833,59 +903,87 @@ class IPD:
 
     def run_ipd(self, current_ts):
         self.logger.info(f"............. run IPD {current_ts} .............")
-        self.remove_old_ips_from_range(current_ts=current_ts)
-        self.is_prevalent_ingress_still_valid() # smehner -> fixed 
+        
+
+        # iterate over all already classified ranges
+         # smehner -> fixed 
         # now go over all already classified ranges        
         
         
         check_list=[]
         buffer_dict={}
 
-        for current_range in list(self.range_lookup_dict[4]) + list(self.range_lookup_dict[6]):
-            check_list.append( self.__convert_range_string_to_range_path(current_range)) # TODO
+        # get all ranges
 
+        # 0.0.0.0/0
+        # ::/0
+        check_list = list(self.range_lookup_dict[4]) + list(self.range_lookup_dict[6])
+
+        self.logger.debug(f" checking {len(check_list)} in this run")
+
+        # TODO add threading/multiprocessing here
         while len(check_list) > 0:
-            current_range_path = check_list.pop()
-
-            # skip already prevalent ingresses
+            # get the items 
+            current_range_path = self.__convert_range_string_to_range_path(check_list.pop())
             ip_version, mask, prange = self.__convert_range_path_to_single_elems(current_range_path)
-            if self.subnet_dict[ip_version][mask][prange].get('prevalent', None) != None: continue
-
-
-            if buffer_dict.get(current_range_path, False):
-                buffer_dict.pop(current_range_path)
-            else:
-
-
-                self.logger.info(f"   current_range: {current_range_path}")
-
-                r = self.check_if_enough_samples_have_been_collected(current_range_path)
-                if r == True:
-                    prevalent_ingress = self.get_prevalent_ingress(current_range_path) # str or None
-                    if prevalent_ingress != None:
-                        self.logger.info(f"        YES -> color {current_range_path} with {prevalent_ingress}")
-
-                        self.set_prevalent_ingress(current_range_path, prevalent_ingress)
-                        continue
-                    else:
-                        self.logger.info(f"        NO -> split subnet")
-                        self.split_range(current_range_path)
-                        continue
-
-                elif r == False:
-                    self.logger.info("      NO -> join siblings")
-
-
-                    x = self.join_siblings(current_range_path)
-                    if x != None:
-                        joined_supernet, sibling_to_pop = x
-                        buffer_dict[sibling_to_pop] = True
-                        check_list.append(joined_supernet)
             
-        
-                elif r == None:
-                    self.logger.info("skip this range since there is nothing to do here")
-                    continue
+            self.remove_expired_ips_from_range(current_ts=current_ts, path=current_range_path)
+
+            # TODO calc prevalent ingress for current range and save it with an tmp attribute
+            # TODO calc min_samples for current range
+            #
+            # something like this:
+            # defaultdict(int,
+            # {'VIE-SB5.1507': 5,
+            # 'VIE-SB5.1530': 6,
+            # 'VIE-SB5.10': 1,
+            # 'VIE-SB5.12': 1,
+            # 'VIE-SB5.26': 1})
+            cache = self.get_prevalent_ingress(current_range_path, raw=True)
+            self.subnet_dict[ip_version][mask][prange]['cache']=cache
+
+
+            if self.subnet_dict[ip_version][mask][prange].get('prevalent', None) != None: 
+                
+                # check already classified range if it is still prevalent
+                self.is_prevalent_ingress_still_valid(current_range_path)
+
+            else:
+                
+                if buffer_dict.get(current_range_path, False):
+                    buffer_dict.pop(current_range_path)
+                else:
+
+
+                    self.logger.info(f"   current_range: {current_range_path}")
+
+                    r = self.check_if_enough_samples_have_been_collected(current_range_path)
+                    if r == True:
+                        prevalent_ingress = self.get_prevalent_ingress(current_range_path) # str or None
+                        if prevalent_ingress != None:
+                            self.logger.info(f"        YES -> color {current_range_path} with {prevalent_ingress}")
+
+                            self.set_prevalent_ingress(current_range_path, prevalent_ingress)
+                            continue
+                        else:
+                            self.logger.info(f"        NO -> split subnet")
+                            self.split_range(current_range_path)
+                            continue
+
+                    elif r == False:
+                        self.logger.info("      NO -> join siblings")
+
+
+                        x = self.join_siblings(current_range_path)
+                        if x != None:
+                            joined_supernet, sibling_to_pop = x
+                            buffer_dict[sibling_to_pop] = True
+                            check_list.append(joined_supernet)
+                
+            
+                    elif r == None:
+                        self.logger.info("skip this range since there is nothing to do here")
+                        continue
 
 
 
@@ -1034,7 +1132,7 @@ if __name__ == '__main__':
     }
 
     if TEST:
-        params = params(dataset, 30, 0.05, 120, 0.9501, 32, 12, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 10, 0.05, 120, 0.9501, 4, 1, 28, 48, 'default', logging.DEBUG)
    
     else:
         params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)
