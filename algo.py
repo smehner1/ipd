@@ -1,8 +1,3 @@
-from ast import While
-from ntpath import join
-from re import I
-from tabnanny import check
-from xml.sax.handler import property_lexical_handler
 import pandas as pd 
 import csv
 import gzip
@@ -24,7 +19,7 @@ TEST=True
 
 RESULT_PREFIX="DEBUG"
 
-IPD_IDLE_BEFORE_START=1
+IPD_IDLE_BEFORE_START=2
 PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
 decay_ingmar_bucket_expire_keep_fraction=0.9
@@ -490,17 +485,29 @@ class IPD:
 
 
         else: # handle single ingress link
+            
+            # if we set an ingress to prevalent it MUST BE in the cache already
+            if self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress'] == ingress:
+                # this should be the case
+                sample_count = sum(self.ipd_cache[ip_version][mask][prange]['cache'].values())
+                miss = sample_count - self.ipd_cache[ip_version][mask][prange]['cache'][ingress]
+                last_seen = self.ipd_cache[ip_version][mask][prange]['cache_prevalent_last_seen']
+                pass
+            else:
+                self.logger.warning(f"passed ingress and cached ingress differ! {ingress} != {self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']}")
+            # for masked_ip in masked_ip_list:
+            #     self.subnet_dict[ip_version][mask][prange][masked_ip]
 
-            for p,ingress_dict in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
-                # TODO TODO TODO 
-                self.logger.debug("calc ingresses {p},{ingress_dict}")
-                for current_ingress in ingress_dict:
+            # for p,ingress_dict in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
+            #     # TODO TODO TODO 
+            #     self.logger.debug("calc ingresses {p},{ingress_dict}")
+            #     for current_ingress in ingress_dict:
 
-                    if current_ingress == ingress:
-                        match += ingress_dict.get(current_ingress)
-                        self.logger.debug(f"calc ingresses +{ingress_dict.get(current_ingress)} -> match {match}")
-                # if v == ingress:
-                #     match += 1
+            #         if current_ingress == ingress:
+            #             match += ingress_dict.get(current_ingress)
+            #             self.logger.debug(f"calc ingresses +{ingress_dict.get(current_ingress)} -> match {match}")
+            #     # if v == ingress:
+            #     #     match += 1
 
 
         sample_count = self.get_sample_count(path)
@@ -915,7 +922,7 @@ class IPD:
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
                 #encode.write("test")
                 for p, i in dp.search(self.subnet_dict, f"*/*/*/prevalent", yielded=True):
-                #ipd_writer.write(b"I'm a log message.\n")
+                
                     #if DEBUG:
                     self.logger.debug("{} {}".format(p,i))
                     
@@ -930,7 +937,7 @@ class IPD:
                     ratio= 1-(miss_samples / total_samples)
 
                     encode.write(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{i}\n")
-
+        self.logger.info(f"dump finished")
     def run_ipd(self, current_ts):
         self.logger.info(f"............. run IPD {current_ts} .............")
         
@@ -1155,8 +1162,8 @@ if __name__ == '__main__':
     }
 
     if TEST:
-        #params = params(dataset, 10, 0.05, 120, 0.9501, 4, 1, 28, 48, 'default', logging.DEBUG)
-        params = params(dataset, 30, 0.05, 120, 0.9501, 64, 24, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 10, 0.05, 120, 0.9501, 1, 0.05, 28, 48, 'default', logging.DEBUG)
+        #params = params(dataset, 30, 0.05, 120, 0.9501, 64, 24, 28, 48, 'default', logging.DEBUG)
    
     else:
         params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)

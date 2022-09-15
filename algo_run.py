@@ -15,7 +15,8 @@ import logging
 from multiprocessing import Pool
 
 import datetime
-
+print("check if you really want it")
+exit()
 TEST=False
 RESULT_PREFIX="_pypy"
 PROCS = 90
