@@ -16,9 +16,9 @@ import time
 
 TEST=False
 
-RESULT_PREFIX=""
+RESULT_PREFIX="_opt_mc"
 
-IPD_IDLE_BEFORE_START=30
+IPD_IDLE_BEFORE_START=3
 PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
 decay_ingmar_bucket_expire_keep_fraction=0.9
@@ -27,7 +27,7 @@ linear_decay = 1000
 bundle_indicator=".b_"
 
 t=60
-bucket_output = t #*5
+bucket_output = t # t *5
 b= 0.05         # allowed delta between bundle load
 
 input_path="/data/fast/mehner/ipd/netflow_merged_sorted"
@@ -242,6 +242,10 @@ class IPD:
             self.logger.critical(f"mask: {mask}, ip_version: {ip_version}, prange: {prange}")
             exit(1)
 
+
+        if type(count) != int:
+            self.logger.warning(f"type(count): {type(count)}  {count}")
+
         # if no prevalent ingress exists, try to get cache data 
         if count < 0:
             try:
@@ -294,11 +298,15 @@ class IPD:
             # get cached data
             if prevalent_ingress != None:
                 prevalent_ratio = self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio']
+                self.logger.debug(f"get from cache: {prevalent_ingress} {prevalent_ratio}")
             
             # calculate from counter_dict
             else:
+                self.logger.debug(f"calculate from counter_dict")
                 total = sum(counter_dict.values())
 
+
+                # single ingresses are handled here
                 for ingress in counter_dict.keys():
                     ratio = counter_dict[ingress]/total
 
@@ -306,12 +314,52 @@ class IPD:
                         prevalent_ingress = ingress
                         prevalent_ratio = ratio
 
-                        self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = ingress
-                        self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
+                        # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = ingress
+                        # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
 
-                if prevalent_ingress == None:
-                    self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = None
-                    self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = -1.00
+                if prevalent_ingress == None: # still no prevalent ingress? -> check for bundles
+
+                    self.logger.debug("CHECK FOR BUNDLES NOW")
+                    bundle_candidates=set()
+                    last_value=None
+                    last_ingress=None
+                    result_dict = __get_shares(counter_dict)
+                    self.logger.debug(result_dict)
+                    
+                    for ingress in result_dict.keys():
+                        value = result_dict.get(ingress)
+                        if value < 0.1: break # since it is sorted; otherwise we should use continue here
+
+                        # first iteration
+                        if last_value == None:
+                            last_value = value
+                            last_ingress = ingress
+                            continue
+
+                        # 2nd ... nth iteration
+                        if value + b >= last_value:
+                                # check if there is the same router
+                                if ingress.split(".")[0] == last_ingress.split(".")[0]:
+                                    bundle_candidates.add(last_ingress)
+                                    bundle_candidates.add(ingress)
+
+                        last_value = value
+                        last_ingress = ingress
+
+                    if len(bundle_candidates) > 0:
+                        self.logger.debug(f"bundle candidates: {bundle_candidates}")
+                        cum_ratio=0
+                        for i in bundle_candidates: cum_ratio += result_dict.get(i)
+
+                        if cum_ratio >= self.q:
+                            # if cum_ratio exceeds q, this will be a bundle
+                            prevalent_ingress=list(bundle_candidates)
+                            ratio = cum_ratio
+
+
+                if prevalent_ingress == None: ratio = -1,00
+                self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = prevalent_ingress
+                self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
 
             self.logger.info("        prevalent for {}: {} ({:.2f})".format(path, prevalent_ingress, prevalent_ratio))
             return prevalent_ingress
@@ -362,7 +410,7 @@ class IPD:
 
                 ratio = 1- (p_miss / p_total)
 
-                counter_dict={p_ingress : (p_total-p_miss), 'miss' : p_miss} # TODO total or matches ?
+                counter_dict={p_ingress : (p_total-p_miss), 'miss' : p_miss}
 
                 res = __get_prev_ing(counter_dict)
                 if res == None:
@@ -388,61 +436,7 @@ class IPD:
                 # is single ingress prevalent?    
                 cur_prevalent = __get_prev_ing(counter_dict)
                 if raw: return counter_dict
-                
-
-                # for ingress in counter_dict:
-                #     ratio = counter_dict.get(ingress) / sample_count
-                #     result_dict[ingress] = round(ratio,3)
-
-                #     # self.logger.info("       ratio for {}: {:.2f}".format(ingress, ratio))
-                #     if ratio >= self.q:  # we found a prevalent ingress point!
-                #         cur_prevalent = ingress
-                #         if not raw: break
-
-                #     # TODO opt: add counter_dict and result_dict to prange
-
-                # check for bundles
-                if cur_prevalent == None: # if we still have not found an ingress, maybe we have a bundle here
-                    bundle_candidates=set()
-                    last_value=None
-                    last_ingress=None
-                    result_dict = __get_shares(counter_dict)
-                    self.logger.debug(result_dict)
-                    for ingress in result_dict.keys():
-                        value = result_dict.get(ingress)
-                        if value < 0.1: break # since it is sorted; otherwise we should use continue here
-
-                        # first iteration
-                        if last_value == None:
-                            last_value = value
-                            last_ingress = ingress
-                            continue
-
-                        # 2nd ... nth iteration
-                        if value + b >= last_value:
-                                # check if there is the same router
-                                if ingress.split(".")[0] == last_ingress.split(".")[0]:
-                                    bundle_candidates.add(last_ingress)
-                                    bundle_candidates.add(ingress)
-
-                        last_value = value
-                        last_ingress = ingress
-
-                    if len(bundle_candidates) > 0:
-                        self.logger.debug(f"bundle candidates: {bundle_candidates}")
-                        cum_ratio=0
-                        for i in bundle_candidates: cum_ratio += result_dict.get(i)
-
-                        if cum_ratio >= self.q:
-                            # if cum_ratio exceeds q, this will be a bundle
-                            cur_prevalent=list(bundle_candidates)
-                            ratio = cum_ratio
-
-
-                if raw:
-                    self.logger.debug(f"counter_dict: {counter_dict}")
-                    return counter_dict
-
+        
 
             if cur_prevalent == None:
                 ratio = -1
@@ -505,10 +499,6 @@ class IPD:
 
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
         self.logger.info("  > Prevalent color still valid (s_color >= q)")
-
-        check_list=[]
-        buffer_dict={}
-
 
         current_prevalent = self.subnet_dict[ip_version][mask][prange]['prevalent']
         new_prevalent = self.get_prevalent_ingress(path= path, current_ts=current_ts)
@@ -794,7 +784,7 @@ class IPD:
 
 
 
-        self.logger.debug("total: {} miss: {} age:{}".format(totc,misc,age) )
+        self.logger.debug("current_ts: {}; e: {}; last_seen: {}; age:{} total: {} miss: {} ".format(current_ts, self.e, last_seen, age, totc,misc) )
         reduce = 0
         if method == 'default': # ingmar
             # my $bucketExpireKeepFraction = 0.9; # all counts get decreased to this fraction every time a bucket is flushed. This fraction decreases for stale buckets
@@ -812,6 +802,7 @@ class IPD:
                 x = decay_ingmar_bucket_expire_keep_fraction if (age <=0) else decay_ingmar_bucket_expire_keep_fraction / (int(age/t) + 1)
                 return 1- x  
             
+            reduce = get_clean_keep_factor(age)
             totc -= totc * get_clean_keep_factor(age)
             misc -= misc * get_clean_keep_factor(age)
 
@@ -861,13 +852,19 @@ class IPD:
             
             #       already classified prefixes -> decrement function
 
-            self.logger.debug(f"decay {path}, {current_ts}")
+            total_before = self.subnet_dict[ip_version][mask][prange].get("total")
+
             self.__decay_counter(current_ts=current_ts, path=path, method=self.decay_method)
-            
+
+            total_now = self.subnet_dict[ip_version][mask][prange].get("total")
+            self.logger.info(f"decay {path}, {current_ts}: total before: {total_before}; total now: {total_now}")
+            if total_now < self.__get_min_samples(path):
+                self.logger.warning(f"!!! {path} below min_samples -> remove all information")
+                self.subnet_dict[ip_version][mask].pop(prange)
         else: 
 
             ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones
-
+            count_counter=0
             pop_counter=0
             masked_ip_list= list(self.subnet_dict[ip_version][mask][prange].keys())
             
@@ -876,6 +873,8 @@ class IPD:
                 masked_ip = masked_ip_list.pop()
 
                 last_seen=0
+        
+                count_counter += self.subnet_dict[ip_version][mask][prange][masked_ip]['total']
                 try:
                     last_seen= self.subnet_dict[ip_version][mask][prange][masked_ip].get("last_seen", -1)
 
@@ -888,8 +887,10 @@ class IPD:
 
                 if last_seen  < current_ts - self.e :
                     try: 
-                        self.subnet_dict[ip_version][mask][prange].pop(masked_ip)
-                        pop_counter +=1
+                        x = self.subnet_dict[ip_version][mask][prange].pop(masked_ip)
+                        #pop_counter +=1
+                        pop_counter += sum(x['ingress'].values())
+
                     except:
                         self.logger.warning("    ERROR: {} cannot be deleted".format(path))
                         pass
@@ -901,6 +902,8 @@ class IPD:
                     
             # TODO check if this is correct finally
             self.logger.debug(f" {path}: {counter_dict}")
+            self.logger.debug(f"count before: {count_counter} - expired {pop_counter} = now: {sum(counter_dict.values())} check: {count_counter-pop_counter}")
+            # TODO update 'total' self.subnet_dict[ip_version][mask][prange]['total']
             self.ipd_cache[ip_version][mask][prange]['cache'] = counter_dict
             
             self.logger.info(f"    {path}: {pop_counter} IPs expired")
@@ -932,10 +935,12 @@ class IPD:
                             miss_samples = int(self.subnet_dict[ip_version][mask][prange]['miss'])
                             total_samples = int(self.subnet_dict[ip_version][mask][prange]['total'])
                             
-
+                            if min_samples >total_samples: 
+                                self.logger.warning(f"total count lower than min samples: {total_samples} / {min_samples}")
+                                self.logger.warning(f"{self.subnet_dict[ip_version][mask][prange]}")
                             ratio= 1-(miss_samples / total_samples)
 
-                            self.logger.debug(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}")
+                            self.logger.info(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}")
                             encode.write(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}\n")            
                     
         self.logger.info(f"dump finished")
@@ -959,7 +964,7 @@ class IPD:
                 check_list.append(self.__convert_range_string_to_range_path(elem))
         check_list = sorted(check_list)
         
-        self.logger.info(f"............. run IPD {current_ts}  -> {len(check_list)}elems.............")
+        self.logger.info(f"............. run IPD {current_ts}  -> {len(check_list)} elems.............")
         self.logger.debug(f" checking {len(check_list)} in this run")
 
         # TODO add threading/multiprocessing here
@@ -970,6 +975,9 @@ class IPD:
             ip_version, mask, prange = self.__convert_range_path_to_single_elems(current_range_path)
             
             self.remove_expired_ips_from_range(current_ts=current_ts, path=current_range_path)
+
+
+
 
             if self.subnet_dict[ip_version][mask][prange].get('prevalent', None) != None: 
                 
@@ -1023,8 +1031,8 @@ class IPD:
                     continue
             
 
-        if current_ts % bucket_output == 0: # dump every 5 min to file
-            self.dump_to_file(current_ts)
+        # if current_ts % bucket_output == 0: # dump every 5 min to file
+        self.dump_to_file(current_ts)
 
         self.logger.debug("bundles: {}".format(self.bundle_dict) )
         self.logger.info(".............Finished.............")
@@ -1169,11 +1177,11 @@ if __name__ == '__main__':
     }
 
     if TEST:
-        params = params(dataset, 30, 0.05, 120, 0.501, 1, 0.05, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
         #params = params(dataset, 30, 0.05, 120, 0.9501, 64, 24, 28, 48, 'default', logging.DEBUG)
    
     else:
-        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)
+        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.DEBUG)
 
     ipd = IPD(params)
     ipd.run()
