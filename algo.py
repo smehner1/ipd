@@ -471,11 +471,14 @@ class IPD:
         miss = sample_count
         
 
-    
+        tmp_dict=defaultdict(int)   
         for single_ingress in ingress:
             miss -= self.ipd_cache[ip_version][mask][prange]['cache'][single_ingress]
-    
+            tmp_dict[single_ingress] += self.ipd_cache[ip_version][mask][prange]['cache'][single_ingress]
             
+        if bundle_indicator in prevalent_name:
+             self.bundle_dict[prevalent_name] = tmp_dict
+             
         pr = self.subnet_dict[ip_version][mask].pop(prange)
         self.logger.info(f" remove state for {len(pr)} IPs")
         
@@ -491,6 +494,7 @@ class IPD:
         self.logger.info(f"        set prevalent ingress: {path} => {prevalent_name}: {ip_version} range {ratio:.3f} {sample_count}/{min_samples} {prange}/{mask} {prevalent_name} | miss: {miss} total: {sample_count}")
         if bundle_indicator in ingress:
             self.logger.info(self.bundle_dict.get(ingress))
+
             pass
         ######## OLD  END
 
@@ -673,7 +677,8 @@ class IPD:
                     
                     tmp_cur_prevalent = ingress
                 else:
-                    self.logger.debug("    join not possible")
+                    #self.logger.debug("    join not possible")
+                    pass
 
         ####### check requirements
         #                     
