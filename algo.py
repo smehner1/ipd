@@ -5,7 +5,6 @@ import pytricia
 from netaddr import *
 from collections import defaultdict, namedtuple
 import math
-import dpath.util as dp 
 import io
 import os
 import argparse
@@ -15,11 +14,11 @@ import queue
 import datetime
 import time
 
-TEST=True
+TEST=False
 
-RESULT_PREFIX="DEBUG"
+RESULT_PREFIX=""
 
-IPD_IDLE_BEFORE_START=2
+IPD_IDLE_BEFORE_START=30
 PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
 decay_ingmar_bucket_expire_keep_fraction=0.9
@@ -28,7 +27,7 @@ linear_decay = 1000
 bundle_indicator=".b_"
 
 t=60
-bucket_output = 5*t
+bucket_output = t #*5
 b= 0.05         # allowed delta between bundle load
 
 input_path="/data/fast/mehner/ipd/netflow_merged_sorted"
@@ -142,7 +141,7 @@ class IPD:
         logfile+=".log"
         logging.basicConfig(filename=logfile,
                         format='%(asctime)s %(levelname)s %(funcName)s %(message)s',
-                        datefmt='%d-%b-%y %H:%M:%S',
+                        datefmt='%y-%m-%d %H:%M:%S',
                         filemode='w',
                         level=ll)
 
@@ -166,7 +165,7 @@ class IPD:
             res =self.range_lookup_dict[ip_version][ip]
         except:
             self.logger.warning(f"key error: {ip}")
-            self.logger.debug("  current ranges: {}".format(list(self.range_lookup_dict[ip_version])))
+            #self.logger.debug("  current ranges: {}".format(list(self.range_lookup_dict[ip_version])))
             pass
 
             res="0.0.0.0/0" if ip_version == 4 else "::/0"
@@ -210,8 +209,10 @@ class IPD:
         return str(ip), int(mask)
 
     def __convert_range_string_to_range_path(self, range_string):
-        ip_version = 4 if not ":" in range_string else 6
-
+        try:
+            ip_version = 4 if not ":" in range_string else 6
+        except:
+            self.logger.warning(f"cannot obtain ipversion -> {range_string}")
         prange, mask = range_string.split("/")
 
         return f"{ip_version}/{mask}/{prange}"
@@ -244,7 +245,7 @@ class IPD:
         # if no prevalent ingress exists, try to get cache data 
         if count < 0:
             try:
-                count = sum(self.subnet_dict.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}).get('cache', -1).values())
+                count = sum(self.ipd_cache.get(int(ip_version),{}).get(int(mask),{}).get(prange, {}).get('cache', -1).values())
             except:
                 # otherwise: count all items
                 count=0
@@ -297,9 +298,14 @@ class IPD:
             # calculate from counter_dict
             else:
                 total = sum(counter_dict.values())
+
                 for ingress in counter_dict.keys():
                     ratio = counter_dict[ingress]/total
-                    if  ratio >= self.q: 
+
+                    if  ratio >= self.q:
+                        prevalent_ingress = ingress
+                        prevalent_ratio = ratio
+
                         self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = ingress
                         self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
 
@@ -327,16 +333,14 @@ class IPD:
         # 'VIE-SB5.10': 1,
         # 'VIE-SB5.12': 1,
         # 'VIE-SB5.26': 1})
-        if self.ipd_cache[ip_version][mask][prange].get('cache_ts', -1) == current_ts:
-            counter_dict = self.ipd_cache[ip_version][mask][prange].get('cache', defaultdict(int))
-        else:
-            counter_dict = defaultdict(int)
+
+        counter_dict = self.ipd_cache[ip_version][mask][prange].get('cache', defaultdict(int))
 
         # use cached data
         if len(counter_dict) >0:
             # if > 0 then we have data
             if raw: return counter_dict
-
+            self.logger.info(f" current shares: {list(__get_shares(counter_dict).items())[:5]}")
             return (__get_prev_ing(counter_dict))
             
         else: # calculate everything from new
@@ -362,22 +366,23 @@ class IPD:
 
                 res = __get_prev_ing(counter_dict)
                 if res == None:
-                    self.logger.warning(f"        prevalent ingress {p_ingress} for {path} below threshold ({ratio}) - pop it")
-                    # TODO remove path if it is not prevalent anymore
-                    self.subnet_dict[ip_version][mask].pop(prange)
+                    self.logger.warning(f"        prevalent ingress {p_ingress} for {path} below threshold ({ratio}) (will be popped in another step)")
+                    # TODO remove path if it is not prevalent anymore -> will be popped in prevalent_color_still_valid
+                    #self.subnet_dict[ip_version][mask].pop(prange)
             
             # not classified yet
             else:
                 # create counter_dict
                 
                 # get all masked ips for current range
-                masked_ips_list=self.subnet_dict[ip_version][mask][prange].keys()
+                #self.logger.warning(f"{mask} {prange} {self.subnet_dict[ip_version][mask][prange].keys()}")
+                masked_ips_list=list(self.subnet_dict[ip_version][mask][prange].keys())
                 
-                while masked_ips_list > 0:
+                while len(masked_ips_list) > 0:
                     masked_ip = masked_ips_list.pop()
 
                     # iterate over all found ingresses for masked ip -> fill counter_dict
-                    for ingress in self.subnet_dict[ip_version][mask][prange][masked_ip]['ingress'].keys():
+                    for ingress in list(self.subnet_dict[ip_version][mask][prange][masked_ip]['ingress'].keys()):
                         counter_dict[ingress] += self.subnet_dict[ip_version][mask][prange][masked_ip]['ingress'][ingress]
 
                 # is single ingress prevalent?    
@@ -444,10 +449,12 @@ class IPD:
                 self.logger.info("        no prevalent ingress found: {}".format(result_dict))
             else:
                 self.logger.info("        prevalent for {}: {} ({:.2f})".format(path, cur_prevalent, ratio))
-
+            
+            # finally add cache entry
+            self.ipd_cache[ip_version][mask][prange]['cache'] = counter_dict
             return cur_prevalent
 
-    def set_prevalent_ingress(self, path, ingress):
+    def set_prevalent_ingress(self, path, ingress, current_ts):
         # if an ingress is prevalent we set a 'prevalent' attribute for this path
         # then we can set the counter for miss and match
         # and pop the list with all single ips
@@ -457,89 +464,41 @@ class IPD:
         #
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
 
-        match=0
-        if type(ingress) == list: # handle bundle
-            # count matches for that ingress'es
+        # single ingress or bundle?
+
+        if type(ingress) == list: # bundle
             bundle_id=len(self.bundle_dict)+1
-            bundle_name="{}{}{}".format(ingress[0].split(".")[0], bundle_indicator, bundle_id)
-            # bundle_name+=",".join(ingress)
-            # bundle_name+=")"
+            prevalent_name ="{}{}{}".format(ingress[0].split(".")[0], bundle_indicator, bundle_id) # name of bundle
+        else: # single
+            prevalent_name = ingress
+            ingress = [ingress] # convert single ingress to list to iterate over all ( =1) ingresses 
 
-            tmp_dict=defaultdict(int)
-            for p,ingress_dict in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
-                self.logger.debug(f"(bundle) calc ingresses , {p},{ingress_dict},")
-                for current_ingress in ingress_dict:
-                    self.logger.debug(f"   > current ingress: {current_ingress}, ingress: {ingress}")
-                    if current_ingress in ingress:
-                        match += ingress_dict.get(current_ingress)  
-                        tmp_dict[current_ingress] += ingress_dict.get(current_ingress)  
-                        self.logger.debug(f"(bundle) calc ingresses +{ingress_dict.get(current_ingress)} -> match {match}")
+        sample_count = sum(self.ipd_cache[ip_version][mask][prange]['cache'].values())
+        miss = sample_count
+        
 
-                # if v in ingress:
-                #     tmp_dict[v] +=1
-                #     match +=1
-
-            self.bundle_dict[bundle_name] = tmp_dict
-
-            ingress=bundle_name
-
-
-        else: # handle single ingress link
+    
+        for single_ingress in ingress:
+            miss -= self.ipd_cache[ip_version][mask][prange]['cache'][single_ingress]
+    
             
-            # if we set an ingress to prevalent it MUST BE in the cache already
-            if self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress'] == ingress:
-                # this should be the case
-                sample_count = sum(self.ipd_cache[ip_version][mask][prange]['cache'].values())
-                miss = sample_count - self.ipd_cache[ip_version][mask][prange]['cache'][ingress]
-                last_seen = self.ipd_cache[ip_version][mask][prange]['cache_prevalent_last_seen']
-                pass
-            else:
-                self.logger.warning(f"passed ingress and cached ingress differ! {ingress} != {self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']}")
-            # for masked_ip in masked_ip_list:
-            #     self.subnet_dict[ip_version][mask][prange][masked_ip]
-
-            # for p,ingress_dict in dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/ingress", yielded=True):
-            #     # TODO TODO TODO 
-            #     self.logger.debug("calc ingresses {p},{ingress_dict}")
-            #     for current_ingress in ingress_dict:
-
-            #         if current_ingress == ingress:
-            #             match += ingress_dict.get(current_ingress)
-            #             self.logger.debug(f"calc ingresses +{ingress_dict.get(current_ingress)} -> match {match}")
-            #     # if v == ingress:
-            #     #     match += 1
-
-
-        sample_count = self.get_sample_count(path)
-
-        last_seen=0
-        try:   
-            last_seen = max(dp.search(self.subnet_dict, f"{ip_version}/{mask}/{prange}/*/last_seen", yielded=True))[1]
-        except:
-            logging.critical("last_seen not avaliable: {}".format(dp.get(self.subnet_dict, f"{ip_version}/{mask}{prange}")))
-                    
-
-        # ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
-
         pr = self.subnet_dict[ip_version][mask].pop(prange)
-
         self.logger.info(f" remove state for {len(pr)} IPs")
-        miss = sample_count-match
-
-        self.subnet_dict[ip_version][mask][prange]['prevalent'] = ingress
+        
+        self.subnet_dict[ip_version][mask][prange]['prevalent'] = prevalent_name
         self.subnet_dict[ip_version][mask][prange]['total'] = sample_count
         self.subnet_dict[ip_version][mask][prange]['miss'] = miss
-        self.subnet_dict[ip_version][mask][prange]['prevalent_last_seen'] = last_seen
+        self.subnet_dict[ip_version][mask][prange]['prevalent_last_seen'] = current_ts
 
 
         #if DEBUG:
         min_samples=self.__get_min_samples(path)
-        ratio= match / sample_count
-        self.logger.info(f"        set prevalent ingress: {path} => {ingress}: {ip_version} range {ratio:.3f} {sample_count}/{min_samples} {prange}/{mask} {ingress} | miss: {miss} total: {sample_count}")
+        ratio= (sample_count - miss) / sample_count
+        self.logger.info(f"        set prevalent ingress: {path} => {prevalent_name}: {ip_version} range {ratio:.3f} {sample_count}/{min_samples} {prange}/{mask} {prevalent_name} | miss: {miss} total: {sample_count}")
         if bundle_indicator in ingress:
             self.logger.info(self.bundle_dict.get(ingress))
             pass
-
+        ######## OLD  END
 
     # iterates over all ranges that are already classified
     def is_prevalent_ingress_still_valid(self, path, current_ts):
@@ -564,7 +523,7 @@ class IPD:
 
         else:
             x = self.subnet_dict[ip_version][mask].pop(prange)
-            self.logger.info(f"     NO → remove all information for {prange}: {x}")
+            self.logger.info(f"     NO → remove all information for {prange}: {len(x)}")
             
             return False            
 
@@ -590,7 +549,7 @@ class IPD:
         # self.logger.info(f"     del {nw}")
 
         self.range_lookup_dict[ip_version].delete(str(nw))
-        masked_ip_list = self.subnet_dict[ip_version][mask][prange].keys()
+        masked_ip_list = list(self.subnet_dict[ip_version][mask][prange].keys())
 
         self.logger.debug(f"        #items {len(masked_ip_list)}")
         
@@ -605,7 +564,7 @@ class IPD:
 
         # when all ips are shifted to new range -> pop prange
         self.subnet_dict[ip_version][mask].pop(prange)
-        self.logger.debug("         self.range_lookup_dict: {}".format(list(self.range_lookup_dict[ip_version])))
+        # self.logger.info(f"range_lookup_dict: (elem count: {len(list(self.range_lookup_dict[ip_version])[:10])}) {list(self.range_lookup_dict[ip_version])[:10]}")
 
     def get_siblings(self, path):
         ip_version, mask, prange = self.__convert_range_path_to_single_elems(path)
@@ -632,14 +591,16 @@ class IPD:
             self.logger.info("        join siblings not possible - we are at the root of the tree")
             return None
 
-        # AAAAAAAAA
+
         nw = IPNetwork(f"{prange}/{mask}")
 
-        #what is the potential sibling?
+
+        #### GET SUPERNET
         nw_supernet=nw.supernet(mask-1)[0]
         supernet_ip=str(nw_supernet).split("/")[0]
         supernet_mask=int(str(nw_supernet).split("/")[1])
 
+        #### GET SIBLINGS
         siblings=list(nw_supernet.subnet(mask))
         the_other_one=None
 
@@ -647,22 +608,52 @@ class IPD:
 
             self.logger.debug(f"sibling: {sibling}")
             # if one of both siblings does not exist -> skip joining
-            if self.range_lookup_dict[ip_version].get(str(sibling), None) == None: return None
+            # rationale: 
+            #   we can only join siblings on same level 
+            #   if one sibling is more specific meanwhile, then joining is not possible:
+            #       e.g.  128.0.0.0/5 and 136.0.0.0/5 to  128.0.0.0/4
+            #              128.0.0.0/5 exists
+            #              136.0.0.0/5 not but 136.0.0.0/6 and 140.0.0.0/6
+            #           -> so skip joining here
+            if self.range_lookup_dict[ip_version].get(str(sibling), None) == None: 
+                self.logger.info(f"sibling does not exist: {str(sibling)} - abort joining")
+                self.logger.info(f"range_lookup_dict: (elem count: {len(list(self.range_lookup_dict[ip_version]))}) {list(self.range_lookup_dict[ip_version])[:10]}")
+                return None
 
-            if str(sibling) != f"{prange}/{mask}": the_other_one=str(sibling)
+            if str(sibling) != f"{prange}/{mask}": the_other_one= str(sibling)
+
+        # remove expired ips from the other one 
+        self.remove_expired_ips_from_range(current_ts, f"{ip_version}/{the_other_one.split('/')[1]}/{the_other_one.split('/')[0]}")
 
 
-        # would joining satisfy s_color >= q?
-        s1=self.get_prevalent_ingress(self.__convert_range_string_to_range_path(str(siblings[0])), current_ts=current_ts, raw=True)
-        s2=self.get_prevalent_ingress(self.__convert_range_string_to_range_path(str(siblings[1])), current_ts=current_ts, raw=True)
+        ####### would joining satisfy s_color >= q?
+        
+        # first get counter_dicts from both siblings
+        s1= self.get_prevalent_ingress(self.__convert_range_string_to_range_path(str(siblings[0])), current_ts=current_ts, raw=True)
+        s2= self.get_prevalent_ingress(self.__convert_range_string_to_range_path(str(siblings[1])), current_ts=current_ts, raw=True)
 
-        if (s1 == None or s2 == None) or (len(s1) == 0 and len(s2) == 0):
-            self.logger.warning("        both prefixes are empty")
-            self.logger.debug("lpm lookup: {}".format(list(self.range_lookup_dict[ip_version])))
-            self.logger.debug("self.subnet_dict: {} {} {}".format(self.subnet_dict.get(ip_version, {}).get(supernet_mask, {}).get(supernet_ip,{})))
+        # if empty -> make an empty dict instead of None
+        s1 = s1 if s1 != None else {}
+        s2 = s2 if s2 != None else {}
+        
+        
+        if (len(s1) == 0 and len(s2) == 0):
+            self.logger.info("both prefixes have no prevalent ingress")
 
-            # TODO pop s1 and s2 and create supernet
-            return None
+        #     self.logger.warning(f"        both prefixes are empty - pop siblings and create supernet {str(nw_supernet)}")
+        #     self.logger.info("lpm lookup: {}".format(list(self.range_lookup_dict[ip_version])))
+            
+        #     # TODO pop s1 and s2 and create supernet
+        #     for sibling in siblings:
+        #         try:
+        #             self.range_lookup_dict[ip_version].delete(str(sibling))
+        #         except:
+        #             self.logger.warning(f"key {sibling} does not exist")
+        #             self.logger.debug("   {}".format(self.range_lookup_dict[ip_version]))
+
+        #     self.range_lookup_dict[ip_version].insert(str(nw_supernet), str(nw_supernet))
+        #     return str(nw_supernet), None
+
         # TODO it can be the case that a bundle is returned here
         #   lookup that bundle
 
@@ -679,7 +670,7 @@ class IPD:
                 # now we have a dict with all ingress links separately
                 # e.g. {'miss': 32, 'VIE-SB5.12': 61000, 'VIE-SB5.10': 61571}
 
-
+        ###### now check if we will get a prevalent ingress in case of joining
         tmp_merged_counter_dict =  {k: s1.get(k, 0) + s2.get(k, 0) for k in set(s1) | set(s2)}
         tmp_merged_sample_count = sum(tmp_merged_counter_dict.values())
 
@@ -688,15 +679,21 @@ class IPD:
                 ratio = tmp_merged_counter_dict.get(ingress) / tmp_merged_sample_count
                 # self.logger.info("       ratio for {}: {:.2f}".format(ingress, ratio))
                 if ratio >= self.q:
-                    self.logger.debug(f" join would set {ingress} as prevalent for {nw_supernet}")
+                    self.logger.info(f"    join possible: join would set {ingress} as prevalent for {nw_supernet}")
                     
                     tmp_cur_prevalent = ingress
+                else:
+                    self.logger.debug("    join not possible")
 
+        ####### check requirements
+        #                     
         # if join(s_color) >= q  OR join(s_ipcount) < n_cidr-1 => let's join siblings
+
         if (tmp_cur_prevalent != None) or (tmp_merged_sample_count < self.__get_min_samples(self.__convert_range_string_to_range_path(str(nw_supernet))) and counter_check):
-            self.logger.info(f" -> join {siblings[0]} and {siblings[1]} to  {nw_supernet}")
+
+            self.logger.info(f" begin to join {siblings[0]} and {siblings[1]} to  {nw_supernet}")
             # if both siblings exists -> delete it from self.range_lookup_dict and add supernet
-            self.logger.debug("len before: {}".format(len(self.subnet_dict[ip_version][supernet_mask][supernet_ip].keys())))
+            self.logger.debug("len before: {}".format(len(list(self.subnet_dict[ip_version][supernet_mask][supernet_ip].keys()))))
 
             # insert new range to lpm lookup tree
             self.range_lookup_dict[ip_version].insert(str(nw_supernet), str(nw_supernet))
@@ -711,13 +708,13 @@ class IPD:
                 try:
                     self.range_lookup_dict[ip_version].delete(str(sibling))
                 except:
-                    self.logger.warning(f"key {sibling} does not exist")
-                    self.logger.debug("   {}".format(self.range_lookup_dict[ip_version]))
+                    self.logger.warning(f"key {sibling} does not exist - cannot remove from LPM lookup tree")
+                    #self.logger.debug("   {}".format(self.range_lookup_dict[ip_version]))
                     pass
-            self.logger.debug("len now: {}".format(len(self.subnet_dict[ip_version][supernet_mask][supernet_ip].keys())))
+            self.logger.debug("len now: {}".format(len(list(self.subnet_dict[ip_version][supernet_mask][supernet_ip].keys()))))
 
-            #       supernet add to list                          sibling that can be removed
-            return f"{ip_version}/{supernet_mask}/{supernet_ip}",the_other_one
+            #     supernet add to list   sibling that can be removed
+            return str(nw_supernet) , str(the_other_one)
 
         else:
             self.logger.info(" NO -> do nothing")
@@ -789,8 +786,10 @@ class IPD:
         totc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['total']
         #matc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['match']
         misc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['miss']
-        last_seen = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['last_seen']
+        last_seen = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['prevalent_last_seen'] # TODO or last_seen??
 
+        if type(last_seen) != int:
+            self.logger.warning(self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}))
         age = (current_ts-self.e) - last_seen
 
 
@@ -881,7 +880,7 @@ class IPD:
                     last_seen= self.subnet_dict[ip_version][mask][prange][masked_ip].get("last_seen", -1)
 
                 except:
-                    print(f"WARNING: {masked_ip} {self.subnet_dict[ip_version][mask][prange][masked_ip]}")
+                    self.logger.warning(f"last seen not here: {masked_ip} {self.subnet_dict[ip_version][mask][prange][masked_ip]}")
 
                 if last_seen < 0: 
                     self.logger.warning(f"no last seen found -> {path}")
@@ -903,7 +902,6 @@ class IPD:
             # TODO check if this is correct finally
             self.logger.debug(f" {path}: {counter_dict}")
             self.ipd_cache[ip_version][mask][prange]['cache'] = counter_dict
-            self.ipd_cache[ip_version][mask][prange]['cache_ts'] = current_ts
             
             self.logger.info(f"    {path}: {pop_counter} IPs expired")
 
@@ -921,72 +919,74 @@ class IPD:
             # Needs to be a bytestring in Python 3
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
                 #encode.write("test")
-                for p, i in dp.search(self.subnet_dict, f"*/*/*/prevalent", yielded=True):
-                
-                    #if DEBUG:
-                    self.logger.debug("{} {}".format(p,i))
-                    
-                    ip_version, mask, prange = self.__convert_range_path_to_single_elems(p)
-                    
-                    self.__convert_range_path_to_single_elems(p)
-                    min_samples=self.__get_min_samples(p)
-                    
-                    miss_samples = int(self.subnet_dict[ip_version][mask][prange]['miss'])
-                    total_samples = int(self.subnet_dict[ip_version][mask][prange]['total'])
 
-                    ratio= 1-(miss_samples / total_samples)
+                for ip_version in self.subnet_dict.keys():
+                    for mask in self.subnet_dict[ip_version].keys():
+                        for prange in self.subnet_dict[ip_version][mask].keys():
+                            
+                            ingress=  self.subnet_dict[ip_version][mask][prange].get('prevalent', None)
+                            if ingress == None:
+                                continue
+                            
+                            min_samples = self.__get_min_samples(f"{ip_version}/{mask}/{prange}")
+                            miss_samples = int(self.subnet_dict[ip_version][mask][prange]['miss'])
+                            total_samples = int(self.subnet_dict[ip_version][mask][prange]['total'])
+                            
 
-                    encode.write(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{i}\n")
+                            ratio= 1-(miss_samples / total_samples)
+
+                            self.logger.debug(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}")
+                            encode.write(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}\n")            
+                    
         self.logger.info(f"dump finished")
-    def run_ipd(self, current_ts):
-        self.logger.info(f"............. run IPD {current_ts} .............")
-        
 
+
+    def run_ipd(self, current_ts):
+        
         # iterate over all already classified ranges
          # smehner -> fixed 
         # now go over all already classified ranges        
-        
-        
         check_list=[]
-        buffer_dict={}
-
         # get all ranges
 
         # 0.0.0.0/0
         # ::/0
-        check_list = list(self.range_lookup_dict[4]) + list(self.range_lookup_dict[6])
-        join_list = []
-
+        self.logger.info(f"prepare check_list")
+        tmp_check_list = list(self.range_lookup_dict[4]) + list(self.range_lookup_dict[6])
+        
+        # convert e.g. 0.0.0.0/0 to 4/0/0.0.0.0
+        for elem in tmp_check_list: 
+                check_list.append(self.__convert_range_string_to_range_path(elem))
+        check_list = sorted(check_list)
+        
+        self.logger.info(f"............. run IPD {current_ts}  -> {len(check_list)}elems.............")
         self.logger.debug(f" checking {len(check_list)} in this run")
 
         # TODO add threading/multiprocessing here
         while len(check_list) > 0:
+            
             # get the items 
-            current_range_path = self.__convert_range_string_to_range_path(check_list.pop())
+            current_range_path = check_list.pop() # self.__convert_range_string_to_range_path(check_list.pop())
             ip_version, mask, prange = self.__convert_range_path_to_single_elems(current_range_path)
             
             self.remove_expired_ips_from_range(current_ts=current_ts, path=current_range_path)
-
-            # TODO calc prevalent ingress for current range and save it with an tmp attribute
-            # TODO calc min_samples for current range
-            #
-            # something like this:
-            # defaultdict(int,
-            # {'VIE-SB5.1507': 5,
-            # 'VIE-SB5.1530': 6,
-            # 'VIE-SB5.10': 1,
-            # 'VIE-SB5.12': 1,
-            # 'VIE-SB5.26': 1})
-            # self.get_prevalent_ingress(current_range_path, current_ts)
-
-
 
             if self.subnet_dict[ip_version][mask][prange].get('prevalent', None) != None: 
                 
                 # check already classified range if it is still prevalent
                 if self.is_prevalent_ingress_still_valid(current_range_path, current_ts):
-                    join_list.append(current_range_path)
-
+                    # None -> do nothing
+                    # tuple(supernet_path, the_other_one)
+                    x = self.join_siblings(current_range_path, current_ts=current_ts, counter_check=False)
+                    if x != None:
+                        supernet, other_one = x
+                        check_list.append(self.__convert_range_string_to_range_path(supernet))
+                        if other_one != None: 
+                            try:
+                                check_list.remove(self.__convert_range_string_to_range_path(other_one))
+                            except:
+                                pass
+                        #check_list = sorted(check_list)
             else:
                 # 
                 self.logger.info(f"   current_range: {current_range_path}")
@@ -997,7 +997,7 @@ class IPD:
                     if prevalent_ingress != None:
                         self.logger.info(f"        YES -> color {current_range_path} with {prevalent_ingress}")
 
-                        self.set_prevalent_ingress(current_range_path, prevalent_ingress)
+                        self.set_prevalent_ingress(current_range_path, prevalent_ingress, current_ts)
                         continue
                     else:
                         self.logger.info(f"        NO -> split subnet")
@@ -1007,21 +1007,28 @@ class IPD:
                 elif r == False:
                     self.logger.info("      NO -> join siblings")
 
-                    join_list.append(current_range_path)
+                    x = self.join_siblings(current_range_path, current_ts=current_ts, counter_check=True)
+                    if x != None:
+                        supernet, other_one = x
+                        check_list.append(self.__convert_range_string_to_range_path(supernet))
+                        if other_one != None: 
+                            try:
+                                check_list.remove(self.__convert_range_string_to_range_path(other_one))
+                            except:
+                                pass
+                        #check_list = sorted(check_list)
                     
                 elif r == None:
                     self.logger.info("skip this range since there is nothing to do here")
                     continue
             
-            # go over join_list
-            self.logger.info(f"{len(join_list)} items to check for joining")
-
 
         if current_ts % bucket_output == 0: # dump every 5 min to file
             self.dump_to_file(current_ts)
 
         self.logger.debug("bundles: {}".format(self.bundle_dict) )
         self.logger.info(".............Finished.............")
+        self.ipd_cache.clear()
 
     def run(self):
 
@@ -1162,7 +1169,7 @@ if __name__ == '__main__':
     }
 
     if TEST:
-        params = params(dataset, 10, 0.05, 120, 0.9501, 1, 0.05, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 30, 0.05, 120, 0.501, 1, 0.05, 28, 48, 'default', logging.DEBUG)
         #params = params(dataset, 30, 0.05, 120, 0.9501, 64, 24, 28, 48, 'default', logging.DEBUG)
    
     else:
