@@ -13,10 +13,13 @@ import threading
 import queue
 import datetime
 import time
+import json
 
 TEST=False
+IPv4_ONLY = False
+DUMP_TREE=True
 
-RESULT_PREFIX="_opt_mc"
+RESULT_PREFIX="_mask_size_ms"
 
 IPD_IDLE_BEFORE_START=3
 PROCS = 90
@@ -27,7 +30,7 @@ linear_decay = 1000
 bundle_indicator=".b_"
 
 t=60
-bucket_output = t # t *5
+bucket_output = t *5
 b= 0.05         # allowed delta between bundle load
 
 input_path="/data/fast/mehner/ipd/netflow_merged_sorted"
@@ -126,8 +129,15 @@ class IPD:
         }
 
         self.output_folder=f"results{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        if TEST: self.output_folder +="_TEST"
+        self.tree_output_folder=f"/data/slow/mehner/dump/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        if TEST: 
+            self.output_folder +="_TEST"
+            if DUMP_TREE:
+                self.tree_output_folder += "_TEST"
+
         os.makedirs(self.output_folder, exist_ok=True)
+        if DUMP_TREE:
+            os.makedirs(self.tree_output_folder, exist_ok=True)
 
         ############################################
         ########### LOGGER CONFIGURATION ###########
@@ -141,7 +151,7 @@ class IPD:
         logfile+=".log"
         logging.basicConfig(filename=logfile,
                         format='%(asctime)s %(levelname)s %(funcName)s %(message)s',
-                        datefmt='%y-%m-%d %H:%M:%S',
+                        # datefmt='%y-%m-%d %H:%M:%S',
                         filemode='w',
                         level=ll)
 
@@ -292,74 +302,66 @@ class IPD:
         # input: counter dict
         # output: prevalent ingress or None
         def __get_prev_ing(counter_dict):
-            prevalent_ingress= self.ipd_cache[ip_version][mask][prange].get('cache_prevalent_ingress', None)
+            prevalent_ingress = None
             prevalent_ratio = -1.00
 
-            # get cached data
-            if prevalent_ingress != None:
-                prevalent_ratio = self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio']
-                self.logger.debug(f"get from cache: {prevalent_ingress} {prevalent_ratio}")
-            
-            # calculate from counter_dict
-            else:
-                self.logger.debug(f"calculate from counter_dict")
-                total = sum(counter_dict.values())
+            total = sum(counter_dict.values())
 
 
-                # single ingresses are handled here
-                for ingress in counter_dict.keys():
-                    ratio = counter_dict[ingress]/total
+            # single ingresses are handled here
+            for ingress in counter_dict.keys():
+                ratio = counter_dict[ingress]/total
 
-                    if  ratio >= self.q:
-                        prevalent_ingress = ingress
-                        prevalent_ratio = ratio
+                if  ratio >= self.q:
+                    prevalent_ingress = ingress
+                    prevalent_ratio = ratio
 
-                        # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = ingress
-                        # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
+                    # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = ingress
+                    # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
 
-                if prevalent_ingress == None: # still no prevalent ingress? -> check for bundles
+            if prevalent_ingress == None: # still no prevalent ingress? -> check for bundles
 
-                    self.logger.debug("CHECK FOR BUNDLES NOW")
-                    bundle_candidates=set()
-                    last_value=None
-                    last_ingress=None
-                    result_dict = __get_shares(counter_dict)
-                    self.logger.debug(result_dict)
-                    
-                    for ingress in result_dict.keys():
-                        value = result_dict.get(ingress)
-                        if value < 0.1: break # since it is sorted; otherwise we should use continue here
+                self.logger.debug("CHECK FOR BUNDLES NOW")
+                bundle_candidates=set()
+                last_value=None
+                last_ingress=None
+                result_dict = __get_shares(counter_dict)
+                self.logger.debug(result_dict)
+                
+                for ingress in result_dict.keys():
+                    value = result_dict.get(ingress)
+                    if value < 0.1: break # since it is sorted; otherwise we should use continue here
 
-                        # first iteration
-                        if last_value == None:
-                            last_value = value
-                            last_ingress = ingress
-                            continue
-
-                        # 2nd ... nth iteration
-                        if value + b >= last_value:
-                                # check if there is the same router
-                                if ingress.split(".")[0] == last_ingress.split(".")[0]:
-                                    bundle_candidates.add(last_ingress)
-                                    bundle_candidates.add(ingress)
-
+                    # first iteration
+                    if last_value == None:
                         last_value = value
                         last_ingress = ingress
+                        continue
 
-                    if len(bundle_candidates) > 0:
-                        self.logger.debug(f"bundle candidates: {bundle_candidates}")
-                        cum_ratio=0
-                        for i in bundle_candidates: cum_ratio += result_dict.get(i)
+                    # 2nd ... nth iteration
+                    if value + b >= last_value:
+                        # check if there is the same router
+                        if ingress.split(".")[0] == last_ingress.split(".")[0]:
+                            bundle_candidates.add(last_ingress)
+                            bundle_candidates.add(ingress)
 
-                        if cum_ratio >= self.q:
-                            # if cum_ratio exceeds q, this will be a bundle
-                            prevalent_ingress=list(bundle_candidates)
-                            ratio = cum_ratio
+                    last_value = value
+                    last_ingress = ingress
+
+                if len(bundle_candidates) > 0:
+                    self.logger.debug(f"bundle candidates: {bundle_candidates}")
+                    cum_ratio=0
+                    for i in bundle_candidates: cum_ratio += result_dict.get(i)
+
+                    if cum_ratio >= self.q:
+                        # if cum_ratio exceeds q, this will be a bundle
+                        prevalent_ingress=list(bundle_candidates)
+                        ratio = cum_ratio
 
 
                 if prevalent_ingress == None: ratio = -1,00
-                self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = prevalent_ingress
-                self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
+                # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ingress']  = prevalent_ingress
+                # self.ipd_cache[ip_version][mask][prange]['cache_prevalent_ratio'] = ratio
 
             self.logger.info("        prevalent for {}: {} ({:.2f})".format(path, prevalent_ingress, prevalent_ratio))
             return prevalent_ingress
@@ -381,7 +383,6 @@ class IPD:
         # 'VIE-SB5.10': 1,
         # 'VIE-SB5.12': 1,
         # 'VIE-SB5.26': 1})
-
         counter_dict = self.ipd_cache[ip_version][mask][prange].get('cache', defaultdict(int))
 
         # use cached data
@@ -407,6 +408,11 @@ class IPD:
                     self.logger.warning(f"p_total < 1: {path} ingress:{p_ingress} total:{p_total} miss:{p_miss} - pop: {pr}")
                     
                     return None
+
+                if bundle_indicator in p_ingress:
+                    
+                    pass
+                
 
                 ratio = 1- (p_miss / p_total)
 
@@ -750,15 +756,18 @@ class IPD:
         else: # 2) there is already a prevalent link
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['total'] += i_count # increment totals
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['prevalent_last_seen'] = int(last_seen)
-
+        
             if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: 
                 self.logger.debug(f"  already classified - {self.subnet_dict[int(ip_version)][int(mask)][prange]}")
                 pass
+
+
             if (bundle_indicator in p_ingress) and (ingress in self.bundle_dict[p_ingress].keys()): # 2b) there is a prevalent bundle:
                 self.bundle_dict[p_ingress][ingress] += i_count
-                if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: 
-                    self.logger.debug(f"  already classified as bundle - {self.bundle_dict[p_ingress][ingress]}")
-                    pass
+
+                self.logger.debug(f"  already classified as bundle - {self.bundle_dict[p_ingress][ingress]}")
+                    
+
             elif ingress == p_ingress: # 2a) there is one single prevalent link
                 # do nothing since we already incremented totals
                 pass
@@ -781,7 +790,8 @@ class IPD:
         totc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['total']
         #matc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['match']
         misc = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['miss']
-        last_seen = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['prevalent_last_seen'] # TODO or last_seen??
+        last_seen = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['prevalent_last_seen'] 
+        prevalent_ingress = self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {})['prevalent_ingress']
 
         if type(last_seen) != int:
             self.logger.warning(self.subnet_dict.get(ip_version,{}).get(mask,{}).get(prange, {}))
@@ -811,20 +821,42 @@ class IPD:
             totc -= totc * get_clean_keep_factor(age)
             misc -= misc * get_clean_keep_factor(age)
 
+            if (bundle_indicator in prevalent_ingress):
+                total = sum(self.bundle_dict[prevalent_ingress].values())
+                
+                for cur_ing in self.bundle_dict[prevalent_ingress].keys():
+                    cur_val = self.bundle_dict[prevalent_ingress][cur_ing]
+                    self.bundle_dict[prevalent_ingress][cur_ing] -= cur_val * reduce * (cur_val / total)
+
+
         elif method == "stefan": # 0.1% of min samples for specific mask exponentially increasing by expired time buckets
             s = self.__get_min_samples(path=path, decrement=True)
             reduce = int(math.pow(s, (int(age/t)+1 )))
             misc -= reduce * (misc / totc)
             totc -= reduce
 
+            # reduce bundle values
+            if (bundle_indicator in prevalent_ingress):
+                total = sum(self.bundle_dict[prevalent_ingress].values())
+                
+                for cur_ing in self.bundle_dict[prevalent_ingress].keys():
+                    cur_val = self.bundle_dict[prevalent_ingress][cur_ing]
+                    self.bundle_dict[prevalent_ingress][cur_ing] -= reduce * (cur_val / total)
 
         elif method == "linear":
             if age > self.e:
-                reduce = self.__get_min_samples(path=path, decrement=True)
+
                 totc -= linear_decay #reduce * (matc / (matc + misc))
                 misc -= linear_decay #reduce * (misc / (matc + misc))
             else:
                 return
+
+            if (bundle_indicator in prevalent_ingress):
+                total = sum(self.bundle_dict[prevalent_ingress].values())
+                
+                for cur_ing in self.bundle_dict[prevalent_ingress].keys():
+                    cur_val = self.bundle_dict[prevalent_ingress][cur_ing]
+                    self.bundle_dict[prevalent_ingress][cur_ing] -= linear_decay * (cur_val / total)
 
         elif method == "none":
             return
@@ -863,6 +895,7 @@ class IPD:
 
             total_now = self.subnet_dict[ip_version][mask][prange].get("total")
             self.logger.info(f"decay {path}, {current_ts}: total before: {total_before}; total now: {total_now}")
+
             if total_now < self.__get_min_samples(path):
                 self.logger.warning(f"!!! {path} below min_samples -> remove all information")
                 self.subnet_dict[ip_version][mask].pop(prange)
@@ -913,9 +946,15 @@ class IPD:
             
             self.logger.info(f"    {path}: {pop_counter} IPs expired")
 
+    def dump_tree_to_file(self, current_ts):
+        self.logger.debug("PROFILING: dump tree to filesystem - start")
+        with open(f"{self.tree_output_folder}/{current_ts}.json", "w") as outfile:
+            json.dump(self.subnet_dict, outfile, indent=4)
+        self.logger.debug("PROFILING: dump tree to filesystem - done")
 
 
-    def dump_to_file(self, current_ts):
+
+    def dump_classified_ranges_to_file(self, current_ts):
         # this should be the output format
         # only dump prevalent ingresses here
         #
@@ -967,10 +1006,15 @@ class IPD:
         # convert e.g. 0.0.0.0/0 to 4/0/0.0.0.0
         for elem in tmp_check_list: 
                 check_list.append(self.__convert_range_string_to_range_path(elem))
-        check_list = sorted(check_list)
+        #check_list = sorted(check_list)
         
         self.logger.info(f"............. run IPD {current_ts}  -> {len(check_list)} elems.............")
         self.logger.debug(f" checking {len(check_list)} in this run")
+
+        for ipv in self.subnet_dict.keys():
+            for mask in self.subnet_dict[ipv].keys():
+                self.logger.info(f" ipv{ipv} mask: {mask} -> {len(self.subnet_dict[ipv][mask].keys())}")
+        
 
         # TODO add threading/multiprocessing here
         while len(check_list) > 0:
@@ -981,8 +1025,7 @@ class IPD:
             
             self.remove_expired_ips_from_range(current_ts=current_ts, path=current_range_path)
 
-
-
+            self.logger.info(f"   current_range: {current_range_path}")
 
             if self.subnet_dict[ip_version][mask][prange].get('prevalent', None) != None: 
                 
@@ -990,6 +1033,7 @@ class IPD:
                 if self.is_prevalent_ingress_still_valid(current_range_path, current_ts):
                     # None -> do nothing
                     # tuple(supernet_path, the_other_one)
+                    self.logger.debug("PROFILING: join siblings - start")
                     x = self.join_siblings(current_range_path, current_ts=current_ts, counter_check=False)
                     if x != None:
                         supernet, other_one = x
@@ -1000,10 +1044,10 @@ class IPD:
                             except:
                                 pass
                         #check_list = sorted(check_list)
+                    self.logger.debug("PROFILING: join siblings - done")
             else:
                 # 
-                self.logger.info(f"   current_range: {current_range_path}")
-
+            
                 r = self.check_if_enough_samples_have_been_collected(current_range_path)
                 if r == True:
                     prevalent_ingress = self.get_prevalent_ingress(path=current_range_path, current_ts=current_ts) # str or None
@@ -1014,12 +1058,15 @@ class IPD:
                         continue
                     else:
                         self.logger.info(f"        NO -> split subnet")
+                        # self.logger.debug("PROFILING: split range - start")
                         self.split_range(current_range_path)
+                        # self.logger.debug("PROFILING: split range - done")
                         continue
 
                 elif r == False:
                     self.logger.info("      NO -> join siblings")
 
+                    # self.logger.debug("PROFILING: join siblings - start")
                     x = self.join_siblings(current_range_path, current_ts=current_ts, counter_check=True)
                     if x != None:
                         supernet, other_one = x
@@ -1030,14 +1077,17 @@ class IPD:
                             except:
                                 pass
                         #check_list = sorted(check_list)
-                    
+                    # self.logger.debug("PROFILING: join siblings - done")
                 elif r == None:
                     self.logger.info("skip this range since there is nothing to do here")
                     continue
             
 
-        # if current_ts % bucket_output == 0: # dump every 5 min to file
-        self.dump_to_file(current_ts)
+        if current_ts % bucket_output == 0: # dump every 5 min to file
+            self.dump_classified_ranges_to_file(current_ts)
+            if DUMP_TREE: self.dump_tree_to_file(current_ts)
+
+        
 
         self.logger.debug("bundles: {}".format(self.bundle_dict) )
         self.logger.info(".............Finished.............")
@@ -1046,6 +1096,8 @@ class IPD:
     def run(self):
 
         # start NF reader 
+        if IPv4_ONLY:
+            self.logger.warning("!!! IPv4 Traffic only !!!")
         threading.Thread(target=self.read_netflow_worker, daemon=True).start()
 
         # start ipd stuff 20s after nf rader starts
@@ -1053,16 +1105,23 @@ class IPD:
 
         while ((not self.read_data_finisehd) or (self.netflow_data_queue.qsize() > 0)):
             # time.sleep(1)
+            self.logger.debug("PROFILING: get netflow bucket from queue - start")
             cur_ts, nf_data = self.netflow_data_queue.get()
-
+            self.logger.debug("PROFILING: get netflow bucket from queue - done")
             # add flows to corresponding ranges 
+
+            self.logger.debug("PROFILING: add netflow to corresponding ranges - start")
             for masked_ip in nf_data:
                 for ingress in nf_data[masked_ip]:
                     icount= nf_data[masked_ip][ingress]
                     if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: self.logger.debug(f"add to subnet: {cur_ts} {masked_ip} {ingress} {icount}")
                     self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=icount)
             
+            self.logger.debug("PROFILING: add netflow to corresponding ranges - done")
+            
+            self.logger.debug("PROFILING: run ipd - start")
             self.run_ipd(cur_ts)
+            self.logger.debug("PROFILING: run ipd - done")
 
             # break if queue is empty ~ reading netflow is done
             if (self.netflow_data_queue.qsize() == 0):
@@ -1081,6 +1140,11 @@ class IPD:
                     line = line.decode('utf-8').split(",")
 
                     router_name = router_ip_lookup_dict.get(line[1])
+                    
+                    if IPv4_ONLY:
+                        ip_version = 4 if not ":" in line[4] else 6
+                        if ip_version == 6: continue
+
                     in_iface = line[2]
                     
                     if len(line) < 15: continue
