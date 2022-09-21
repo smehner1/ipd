@@ -617,8 +617,11 @@ class IPD:
         ####### would joining satisfy s_color >= q?
         
         # first get counter_dicts from both siblings
-        s1= self.get_prevalent_ingress(self.__convert_range_string_to_tuple(str(siblings[0])), raw=True)
-        s2= self.get_prevalent_ingress(self.__convert_range_string_to_tuple(str(siblings[1])), raw=True)
+        s1_ip_version, s1_mask, s1_prange = self.__convert_range_string_to_tuple(str(siblings[0]))
+        s1= self.get_prevalent_ingress(s1_ip_version, s1_mask, s1_prange, raw=True)
+
+        s2_ip_version, s2_mask, s2_prange = self.__convert_range_string_to_tuple(str(siblings[1]))
+        s2= self.get_prevalent_ingress(s2_ip_version, s2_mask, s2_prange, raw=True)
 
         # if empty -> make an empty dict instead of None
         s1 = s1 if s1 != None else {}
