@@ -224,7 +224,7 @@ class IPD:
             self.logger.warning(f"cannot obtain ipversion -> {range_string}")
         prange, mask = range_string.split("/")
 
-        return (ip_version,mask,prange)
+        return (int(ip_version),int(mask),prange)
         
 
     def __convert_range_path_to_single_elems(self, path):
@@ -611,14 +611,14 @@ class IPD:
             if str(sibling) != f"{prange}/{mask}": the_other_one= str(sibling)
 
         # remove expired ips from the other one 
-        self.remove_expired_ips_from_range(current_ts, f"{ip_version}/{the_other_one.split('/')[1]}/{the_other_one.split('/')[0]}")
+        self.remove_expired_ips_from_range(ip_version, int(the_other_one.split('/')[1]), the_other_one.split('/')[0], current_ts)
 
 
         ####### would joining satisfy s_color >= q?
         
         # first get counter_dicts from both siblings
-        s1= self.get_prevalent_ingress(self.__convert_range_string_to_tuple(str(siblings[0])), current_ts=current_ts, raw=True)
-        s2= self.get_prevalent_ingress(self.__convert_range_string_to_tuple(str(siblings[1])), current_ts=current_ts, raw=True)
+        s1= self.get_prevalent_ingress(self.__convert_range_string_to_tuple(str(siblings[0])), raw=True)
+        s2= self.get_prevalent_ingress(self.__convert_range_string_to_tuple(str(siblings[1])), raw=True)
 
         # if empty -> make an empty dict instead of None
         s1 = s1 if s1 != None else {}
@@ -1034,7 +1034,7 @@ class IPD:
             
                 r = self.check_if_enough_samples_have_been_collected(ip_version, mask, prange)
                 if r == True:
-                    prevalent_ingress = self.get_prevalent_ingress(ip_version, mask, prange,  current_ts=current_ts) # str or None
+                    prevalent_ingress = self.get_prevalent_ingress(ip_version, mask, prange) # str or None
                     if prevalent_ingress != None:
                         self.logger.info(f"        YES -> color {ip_version} {mask} {prange} with {prevalent_ingress}")
 
