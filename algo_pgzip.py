@@ -1,5 +1,6 @@
 import csv
-import gzip
+import pgzip
+
 import pytricia
 from netaddr import *
 from collections import defaultdict, namedtuple
@@ -16,7 +17,7 @@ TEST=False
 IPv4_ONLY = False
 DUMP_TREE=True
 
-RESULT_PREFIX="_rt"
+RESULT_PREFIX="_pgzip"
 
 IPD_IDLE_BEFORE_START=3
 PROCS = 90
@@ -64,7 +65,7 @@ with open(router_ip_mapping_file, 'r') as csv_file:
 print("> load ingresslink file")
 
 ingresslink_dict= {}
-with gzip.open("{}".format(ingresslink_file), 'rb') as f:
+with pgzip.open("{}".format(ingresslink_file), 'rb') as f:
     for line in f:
         line = line.decode('utf-8').split(",")
         router= line[0].replace("PEER_SRC_IP=", "")
@@ -948,9 +949,6 @@ class IPD:
         self.logger.debug("PROFILING: dump tree to filesystem - start")
         with open(f"{self.tree_output_folder}/{current_ts}.json", "w") as outfile:
             json.dump(self.subnet_dict, outfile, indent=4)
-        with open(f"{self.tree_output_folder}/{current_ts}_bundles.json", "w") as outfile:
-            json.dump(self.bundle_dict, outfile, indent=4)
-        
         self.logger.debug("PROFILING: dump tree to filesystem - done")
 
 
@@ -963,7 +961,7 @@ class IPD:
         output_file = f"{self.output_folder}/range.{current_ts}.gz"
 
         self.logger.info(f"dump to file: {output_file}")
-        with gzip.open(output_file, 'wb') as ipd_writer:
+        with pgzip.open(output_file, 'wb') as ipd_writer:
             # Needs to be a bytestring in Python 3
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
                 #encode.write("test")
@@ -1150,7 +1148,7 @@ class IPD:
     def read_netflow(self):
         added_counter=0
         for gzfile in gzfiles:
-            with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
+            with pgzip.open(f"{input_path}/{gzfile}", 'rt',  thread=60) as f:
             #with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
                 for line in f:
                     #line = line.decode('utf-8').split(",")
@@ -1187,6 +1185,7 @@ class IPD:
             cur_ts= int(nf_row[0])
             ingress= nf_row[1]
             src_ip = nf_row[2]
+            #masked_ip = src_ip # TODO !!!
             masked_ip=self.mask_ip(src_ip)
 
             # initial set current ts
