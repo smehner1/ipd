@@ -11,14 +11,15 @@ import logging
 import threading
 import time
 import json
+import sys
 
-TEST=False
+TEST=True
 IPv4_ONLY = False
 DUMP_TREE=True
 
-RESULT_PREFIX="_rt"
+RESULT_PREFIX=""
 
-IPD_IDLE_BEFORE_START=3
+IPD_IDLE_BEFORE_START=10
 PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
 decay_ingmar_bucket_expire_keep_fraction=0.9
@@ -211,12 +212,21 @@ class IPD:
         if ip_version == 6:
             ipv_max = 64
 
+        
+
         min_samples= self.min_sample_cache[ip_version].get(mask, -1)
         if min_samples < 0:
-            min_samples=int(cc * math.sqrt( math.pow(2, (ipv_max - mask))))
+            if ip_version == 4:
+                ipv_max = 32
+                min_samples=int(cc * math.sqrt( math.pow(2, (ipv_max - mask))))
+            elif ip_version == 6:
+                ipv_max = 64
+                min_samples=int(cc * math.sqrt(math.sqrt( math.pow(2, (ipv_max - mask)))))
+            else:
+                self.logger.critical(f"ip_version not known: {ip_version}")
+            
             self.min_sample_cache[ip_version][mask] = min_samples
 
-        # self.logger.info(f"min samples: {min_samples}")
         return min_samples
 
 
@@ -275,7 +285,7 @@ class IPD:
                 
                 # TODO opt: add count to prange
                 if count <=0 or count == {}:
-                    self.logger.warning(f" key {ip_version} {mask} {prange} does not exist")
+                    self.logger.info(f" key {ip_version} {mask} {prange} does not exist")
                     self.logger.debug(self.subnet_dict[ip_version][mask])
                     return -1
 
@@ -285,12 +295,13 @@ class IPD:
         
         sample_count = self.get_sample_count(ip_version, mask, prange)
         if sample_count < 0: # if -1 -> key error
-            self.logger.warning(f"key not found {ip_version} {mask} {prange}")
+            self.logger.info(f"key not found {ip_version} {mask} {prange}")
             return None
 
         min_samples= self.__get_min_samples(ip_version, mask)
 
         self.logger.info(f"  > Check if enough samples have been collected (s_ipcount >= n_cidr ) {ip_version} {mask} {prange}  s_ipcount={sample_count} min_samples={min_samples}")
+
         if sample_count >= min_samples:
             return True
         else:
@@ -895,7 +906,7 @@ class IPD:
             self.logger.info(f"decay {ip_version} {mask} {prange}, {current_ts}: total before: {total_before}; total now: {total_now}")
 
             if total_now < self.__get_min_samples(ip_version, mask):
-                self.logger.warning(f"!!!  {ip_version} {mask} {prange} below min_samples -> remove all information")
+                self.logger.info(f"!!!  {ip_version} {mask} {prange} below min_samples -> remove all information")
                 self.subnet_dict[ip_version][mask].pop(prange)
         else: 
 
@@ -950,7 +961,7 @@ class IPD:
             json.dump(self.subnet_dict, outfile, indent=4)
         with open(f"{self.tree_output_folder}/{current_ts}_bundles.json", "w") as outfile:
             json.dump(self.bundle_dict, outfile, indent=4)
-        
+            
         self.logger.debug("PROFILING: dump tree to filesystem - done")
 
 
@@ -1105,8 +1116,14 @@ class IPD:
         while True:
             # time.sleep(1)
             
-            cur_ts = list(self.netflow_data_dict.keys())[0] # dicts in python 3.x are reihenfolgeerhaltend, so lets try 
+            cur_ts = list(self.netflow_data_dict.keys())
+            if len(cur_ts) == 0:
+                self.logger.critical("there is no data yet")
+                time.sleep(5)
+            else:
+                cur_ts = cur_ts[0] # dicts in python 3.x are reihenfolgeerhaltend, so lets try 
         
+            
             if cur_ts == -1: 
                 self.logger.warning("IPD done")
                 break
@@ -1149,31 +1166,31 @@ class IPD:
 
     def read_netflow(self):
         added_counter=0
-        for gzfile in gzfiles:
-            with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
+        #for gzfile in gzfiles:
+            #with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
             #with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
-                for line in f:
-                    #line = line.decode('utf-8').split(",")
-                    line = line.rstrip().split(",")
+        for line in sys.stdin:
+            #line = line.decode('utf-8').split(",")
+            line = line.rstrip().split(",")
 
-                    router_name = router_ip_lookup_dict.get(line[1])
-                    
-                    if IPv4_ONLY:
-                        ip_version = 4 if not ":" in line[4] else 6
-                        if ip_version == 6: continue
+            router_name = router_ip_lookup_dict.get(line[1])
+            
+            if IPv4_ONLY:
+                ip_version = 4 if not ":" in line[4] else 6
+                if ip_version == 6: continue
 
-                    in_iface = line[2]
-                    
-                    if len(line) < 15: continue
-                    
-                    if line[-3] == "TIMESTAMP_END": continue
-                    if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
-                    src_ip = line[4]    
-                    cur_ts = int(int(line[-3]) / self.t) * self.t
-                    added_counter +=1
+            in_iface = line[2]
+            
+            if len(line) < 15: continue
+            
+            if line[-3] == "TIMESTAMP_END": continue
+            if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
+            src_ip = line[4]    
+            cur_ts = int(int(line[-3]) / self.t) * self.t
+            added_counter +=1
 
 
-                    yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
+            yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
                     
     def read_netflow_worker(self):
         print("start read_netflow_worker ")
@@ -1262,7 +1279,7 @@ if __name__ == '__main__':
 
     if TEST:
         #params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
-        params = params(dataset, 30, 0.05, 120, 0.9501, 64, 24, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 30, 0.05, 120, 0.9501, 64, 0.000005, 28, 48, 'default', logging.DEBUG)
    
     else:
         params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.WARNING)
