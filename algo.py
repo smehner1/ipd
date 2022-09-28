@@ -1279,6 +1279,7 @@ if __name__ == '__main__':
         6: args.c6
     }
 
+    
     if TEST:
         #params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
         params = params(dataset, 30, 0.05, 120, 0.9501, 64, 0.000005, 28, 48, 'default', logging.DEBUG)
