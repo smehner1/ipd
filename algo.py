@@ -13,7 +13,7 @@ import time
 import json
 import sys
 
-TEST=True
+TEST=False
 IPv4_ONLY = False
 DUMP_TREE=True
 
@@ -107,7 +107,9 @@ class IPD:
         print("------------------------")
 
         # initialization
-        self.range_lookup_dict = self.__multi_dict(1, pytricia.PyTricia) #defaultdict(lambda: pytricia.PyTricia())
+        def pytricia_init():
+            return pytricia.PyTricia(params.cidrmax6)
+        self.range_lookup_dict = self.__multi_dict(1, pytricia_init) #defaultdict(lambda: pytricia.PyTricia())
         self.range_lookup_dict[4].insert("0.0.0.0/0", "0.0.0.0/0")
         self.range_lookup_dict[6].insert("::/0", "::/0")
 
@@ -746,7 +748,7 @@ class IPD:
         prange, mask = self.__split_ip_and_mask(self.get_corresponding_range(masked_ip))
         self.debug_flow_output_counter +=1
         if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT:
-            self.logger.debug(f"add flow {ip}, {ingress}, {last_seen} --> {ip_version}, {mask}, {masked_ip} --> {self.get_corresponding_range(masked_ip)}")
+            self.logger.debug(f"add flow {masked_ip}, {ingress}, {last_seen} --> {ip_version}, {mask}, {masked_ip} --> {self.get_corresponding_range(masked_ip)}")
             self.debug_flow_output_counter = 0
         
         # get current prev ingress if existing
@@ -1282,7 +1284,7 @@ if __name__ == '__main__':
         params = params(dataset, 30, 0.05, 120, 0.9501, 64, 0.000005, 28, 48, 'default', logging.DEBUG)
    
     else:
-        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.WARNING)
+        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)
 
     ipd = IPD(params)
     ipd.run()
