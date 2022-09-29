@@ -13,11 +13,11 @@ import time
 import json
 import sys
 
-TEST=False
+TEST=True
 IPv4_ONLY = False
 DUMP_TREE=True
 
-RESULT_PREFIX=""
+RESULT_PREFIX="/debug"
 
 IPD_IDLE_BEFORE_START=10
 PROCS = 90
@@ -122,6 +122,7 @@ class IPD:
         self.netflow_data_dict = self.__multi_dict(3, int)
 
         self.bundle_dict={}
+        self.bundle_id=0
         self.d = params.d
         self.t = params.t #60 
         self.e=  params.e #120
@@ -349,7 +350,7 @@ class IPD:
                 
                 for ingress in result_dict.keys():
                     value = result_dict.get(ingress)
-                    if value < 0.1: break # since it is sorted; otherwise we should use continue here
+                    if value < 0.095: break # since it is sorted; otherwise we should use continue here
 
                     # first iteration
                     if last_value == None:
@@ -360,9 +361,13 @@ class IPD:
                     # 2nd ... nth iteration
                     if value + b >= last_value:
                         # check if there is the same router
-                        if ingress.split(".")[0] == last_ingress.split(".")[0]:
+                        if len(bundle_candidates) == 0 and  (ingress.split(".")[0] == last_ingress.split(".")[0]):
                             bundle_candidates.add(last_ingress)
                             bundle_candidates.add(ingress)
+                            # if there are bundle candidates: check if current ingress is same router as before
+                        elif len(bundle_candidates) > 0 and (list(bundle_candidates)[0].split(".")[0]) == ingress.split(".")[0]:
+                            bundle_candidates.add(ingress)
+                            
 
                     last_value = value
                     last_ingress = ingress
@@ -485,8 +490,8 @@ class IPD:
         # single ingress or bundle?
 
         if type(ingress) == list: # bundle
-            bundle_id=len(self.bundle_dict)+1
-            prevalent_name ="{}{}{}".format(ingress[0].split(".")[0], bundle_indicator, bundle_id) # name of bundle
+            self.bundle_id +=1
+            prevalent_name ="{}{}{}".format(ingress[0].split(".")[0], bundle_indicator, self.bundle_id) # name of bundle
         else: # single
             prevalent_name = ingress
             ingress = [ingress] # convert single ingress to list to iterate over all ( =1) ingresses 
@@ -504,6 +509,8 @@ class IPD:
              self.bundle_dict[prevalent_name] = tmp_dict
              
         pr = self.subnet_dict[ip_version][mask].pop(prange)
+        # TODO remove here too?
+
         self.logger.info(f" remove state for {len(pr)} IPs")
         
         self.subnet_dict[ip_version][mask][prange]['prevalent'] = prevalent_name
@@ -540,6 +547,8 @@ class IPD:
 
         else:
             x = self.subnet_dict[ip_version][mask].pop(prange)
+            if bundle_indicator in current_prevalent: 
+                self.bundle_dict.pop(current_prevalent)
             self.logger.info(f"     NO → remove all information for {prange}: {len(x)}")
             
             return False            
@@ -910,6 +919,11 @@ class IPD:
             if total_now < self.__get_min_samples(ip_version, mask):
                 self.logger.info(f"!!!  {ip_version} {mask} {prange} below min_samples -> remove all information")
                 self.subnet_dict[ip_version][mask].pop(prange)
+
+                # get current prevalent ingress to remove it from bundle dict if necessary
+                prevalent = self.subnet_dict[ip_version][mask][prange].get("prevalent")
+                if bundle_indicator in prevalent: 
+                    self.bundle_dict.pop(prevalent)
         else: 
 
             ##      unclassified prefixies      -> iterate over ip addresses and pop expired ones
@@ -1279,13 +1293,13 @@ if __name__ == '__main__':
         6: args.c6
     }
 
-    
+
     if TEST:
         #params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
-        params = params(dataset, 30, 0.05, 120, 0.9501, 64, 0.000005, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 30, 0.05, 120, 0.9501, 1, 1, 28, 48, 'default', logging.DEBUG)
    
     else:
-        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)
+        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, args.loglevel)
 
     ipd = IPD(params)
     ipd.run()
