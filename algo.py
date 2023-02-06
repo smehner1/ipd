@@ -19,7 +19,7 @@ import datetime
 # -cidrmax6 48 -e 500 -t 60
 
 # run this with: sudo bash /home/WORK/masterthesis/ipd/collect_netflow.sh | python3 algo.py
-MINI_SETUP = False
+MINI_SETUP = True
 TEST_MIN_SAMPLES = False
 
 TEST = False
@@ -1268,7 +1268,7 @@ class IPD:
         start = datetime.datetime.now()
         last_time = start
 
-        with open(TIME_LOG, 'w') as file:
+        with open(f'{self.output_folder}/times.txt', 'w') as file:
             file.write(f'Start Time: {start}\n\n')
 
         for nf_row in nf_data:
@@ -1300,7 +1300,7 @@ class IPD:
                 epoch_time = datetime.datetime.now()
                 exec_time = epoch_time-last_time
                 last_time = epoch_time
-                with open(TIME_LOG, 'a') as file:
+                with open(f'{self.output_folder}/times.txt', 'a') as file:
                     file.write(f'Epoch End: {epoch_time}\n')
                     file.write(f'Execution: {exec_time}\n\n')
 
