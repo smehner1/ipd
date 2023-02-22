@@ -12,15 +12,19 @@ import threading
 import time
 import json
 import sys
+import psutil
 
-TEST=True
+RAM_THRESHOLD=85     # %
+RAM_COOLDOWN_TIME=300 #sec
+RAM_CHECK_AFTER_N_LINES= 10000
+
+TEST=False
 IPv4_ONLY = False
 DUMP_TREE=True
 
-RESULT_PREFIX="/debug"
+RESULT_PREFIX="parameter_study"
 
 IPD_IDLE_BEFORE_START=10
-PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
 decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
@@ -139,8 +143,8 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder=f"results{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        self.tree_output_folder=f"/data/slow/mehner/dump/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.output_folder = f"/data/slow/mehner/ipd/algo/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.tree_output_folder = f"/data/slow/mehner/ipd/algo/dump/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: 
             self.output_folder +="_TEST"
             if DUMP_TREE:
@@ -156,8 +160,8 @@ class IPD:
 
         ll = params.loglevel
         #if TEST: ll=logging.DEBUG
-        os.makedirs(f"log{RESULT_PREFIX}", exist_ok=True)
-        logfile=f"log{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        os.makedirs(f"/data/slow/mehner/ipd/algo/log/{RESULT_PREFIX}", exist_ok=True)
+        logfile = f"/data/slow/mehner/ipd/algo/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
         logging.basicConfig(filename=logfile,
@@ -429,7 +433,7 @@ class IPD:
             if p_ingress != None and p_total != None: # there is a prevalent ingress yet
                 if p_total < 1: 
                     pr = self.subnet_dict[ip_version][mask].pop(prange)
-                    self.logger.warning(f"p_total < 1: {ip_version} {mask} {prange} ingress:{p_ingress} total:{p_total} miss:{p_miss} - pop: {pr}")
+                    self.logger.info(f"p_total < 1: {ip_version} {mask} {prange} ingress:{p_ingress} total:{p_total} miss:{p_miss} - pop: {pr}")
                     
                     return None
 
@@ -546,11 +550,15 @@ class IPD:
             return True
 
         else:
-            x = self.subnet_dict[ip_version][mask].pop(prange)
-            if bundle_indicator in current_prevalent: 
-                self.bundle_dict.pop(current_prevalent)
-            self.logger.info(f"     NO → remove all information for {prange}: {len(x)}")
-            
+            try:
+                x = self.subnet_dict[ip_version][mask].pop(prange)
+                if bundle_indicator in current_prevalent:
+                    self.logger.info(f"remove {current_prevalent} from bundle_dict")
+                    self.bundle_dict.pop(current_prevalent)
+                    self.logger.info(f"     NO → remove all information for {prange}: {len(x)}")
+            except:
+                self.logger.warn(f" pop {prange} failed")
+                
             return False            
 
     def split_range(self, ip_version, mask, prange):
@@ -851,7 +859,11 @@ class IPD:
 
         elif method == "stefan": # 0.1% of min samples for specific mask exponentially increasing by expired time buckets
             s = self.__get_min_samples(ip_version, mask, decrement=True)
-            reduce = int(math.pow(s, (int(age/t)+1 )))
+            reduce = 0
+            try: 
+                reduce = int(math.pow(s, (int(age/t)+1 )))
+            except:
+                pass
             misc -= reduce * (misc / totc)
             totc -= reduce
 
@@ -922,7 +934,8 @@ class IPD:
 
                 # get current prevalent ingress to remove it from bundle dict if necessary
                 prevalent = self.subnet_dict[ip_version][mask][prange].get("prevalent")
-                if bundle_indicator in prevalent: 
+                if (prevalent !=None) and (bundle_indicator in prevalent): 
+                    self.logger.info(f"remove {prevalent} from bundle_dict")
                     self.bundle_dict.pop(prevalent)
         else: 
 
@@ -1127,8 +1140,8 @@ class IPD:
         threading.Thread(target=self.read_netflow_worker, daemon=True).start()
 
         # start ipd stuff 20s after nf rader starts
-        time.sleep(1)
-
+        time.sleep(20)
+        self.logger.warning(f"start new study; current RAM usage {psutil.virtual_memory()[2]}%")
         while True:
             # time.sleep(1)
             
@@ -1154,7 +1167,21 @@ class IPD:
             
             self.logger.debug("PROFILING: get netflow bucket from dict - start")
             print(cur_ts)
+            
+            nf_data.clear()
+            nf_data= {}
             nf_data = self.netflow_data_dict.pop(cur_ts)
+
+            ## SMEHNER
+
+            # import json
+
+            # with open(f"{cur_ts}.json", "w") as outfile:
+            #     json.dump(nf_data, outfile)
+            tmp = self.netflow_data_dict.copy()
+            self.netflow_data_dict = {}
+            self.netflow_data_dict = tmp.copy()
+
             self.logger.debug("PROFILING: get netflow bucket from dict - done")
             # add flows to corresponding ranges 
 
@@ -1182,11 +1209,26 @@ class IPD:
 
     def read_netflow(self):
         added_counter=0
+        ram_counter=0
         #for gzfile in gzfiles:
             #with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
             #with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
         for line in sys.stdin:
             #line = line.decode('utf-8').split(",")
+
+            ####################################################
+            ####### CHECK RAM USAGE TO PREVENT FREEEZING #######
+            ####################################################
+            if ram_counter >= RAM_CHECK_AFTER_N_LINES:
+                ram_counter =0
+                
+                if psutil.virtual_memory()[2] > RAM_THRESHOLD:
+                    self.logger.warning(f"RAM WARNING: currently {psutil.virtual_memory()[2]} in use -> cooldown for {RAM_COOLDOWN_TIME} seconds")
+                    time.sleep(RAM_COOLDOWN_TIME)
+                
+            ram_counter+=1
+            ####################################################
+
             line = line.rstrip().split(",")
 
             router_name = router_ip_lookup_dict.get(line[1])
@@ -1229,6 +1271,7 @@ class IPD:
             if cur_ts > last_ts: 
                 self.logger.debug(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter}") # #\tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
                 print(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter} ") # \tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
+
                 add_counter=0
                 
                 last_ts = cur_ts # next epoch
@@ -1296,7 +1339,7 @@ if __name__ == '__main__':
 
     if TEST:
         #params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
-        params = params(dataset, 30, 0.05, 120, 0.9501, 1, 1, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 10, 0.05, 120, 0.51, 0.05, 1, 28, 48, 'default', logging.DEBUG)
    
     else:
         params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, args.loglevel)
