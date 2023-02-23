@@ -14,6 +14,7 @@ import json
 import sys
 import signal
 import datetime
+import subprocess
 
 # sudo bash ~/WORK/masterthesis/ipd/collect_netflow.sh | sudo python3 algo.py -q 0.51 -c4 1 -c6 1 -cidrmax4 24
 # -cidrmax6 48 -e 500 -t 60
@@ -23,7 +24,7 @@ MINI_SETUP = True
 TEST_MIN_SAMPLES = False
 
 TEST = False
-IPv4_ONLY = False
+IPv4_ONLY = True
 DUMP_TREE = False
 
 RESULT_PREFIX = ""
@@ -1303,6 +1304,7 @@ class IPD:
                 with open(f'{self.output_folder}/times.txt', 'a') as file:
                     file.write(f'Epoch End: {epoch_time}\n')
                     file.write(f'Execution: {exec_time}\n\n')
+                subprocess.call(f'./cpu_usage.sh {self.output_folder}', shell=True)
 
             # add data for next t seconds
             # self.add_to_subnet(last_seen=cur_ts, ingress=ingress, ip=src_ip)
@@ -1343,6 +1345,7 @@ if __name__ == '__main__':
     print(f"cidrmax4 {args.cidrmax4}")
     print(f"cidrmax6 {args.cidrmax6}")
     print(f"dataset {args.d}")
+    print(f"loglevel {args.loglevel}")
     print("------------------------")
 
     dataset = args.d
@@ -1365,7 +1368,7 @@ if __name__ == '__main__':
         # params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
         params = params(dataset, 10, 0.05, 120, 0.51, 1, 1, 28, 48, 'default', logging.DEBUG)
     else:
-        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.INFO)
+        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.DEBUG)
 
     # print(router_ip_lookup_dict)
 
