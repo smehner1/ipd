@@ -13,8 +13,16 @@ import time
 import json
 import sys
 import psutil
+import socket
+hostname=socket.gethostname()
 
-RAM_THRESHOLD=85     # %
+if hostname == 'bithouse':
+    base_path = "/data/slow/mehner/ipd"
+elif hostname == 'manni':
+    base_path = "/home/stefan/WORK/ipd"
+REDUCED_NETFLOW_FILES=True
+
+RAM_THRESHOLD=95     # %
 RAM_COOLDOWN_TIME=300 #sec
 RAM_CHECK_AFTER_N_LINES= 10000
 
@@ -36,24 +44,28 @@ bucket_output = t *5
 dump_output = 1800 # 30min
 b= 0.05         # allowed delta between bundle load
 
-input_path="/data/fast/mehner/ipd/netflow_merged_sorted"
-gzfiles=["@000000000000001605556860.gz", "@000000000000001605560460.gz", "@000000000000001605564060.gz", 
-         "@000000000000001605567660.gz", "@000000000000001605571260.gz", "@000000000000001605574860.gz", 
-         "@000000000000001605578460.gz", "@000000000000001605582060.gz", "@000000000000001605585660.gz", 
-         "@000000000000001605589260.gz", "@000000000000001605592860.gz", "@000000000000001605596460.gz", 
-         "@000000000000001605600060.gz", "@000000000000001605603660.gz", "@000000000000001605607260.gz", 
-         "@000000000000001605610860.gz", "@000000000000001605614460.gz", "@000000000000001605618060.gz", 
-         "@000000000000001605621660.gz", "@000000000000001605625260.gz", "@000000000000001605628860.gz", 
-         "@000000000000001605632460.gz", "@000000000000001605636060.gz", "@000000000000001605639660.gz", 
-         "@000000000000001605643260.gz"]
-if TEST: gzfiles=["nf_test.gz"]#10000000
-
 
 cols=['tag', 'peer_src_ip', 'in_iface', 'out_iface', 'src_ip', 'dst_net', 'src_port', 'dst_port', 'proto', '__', '_', 'ts_start', 'ts_end', 'pkts', 'bytes']
 
+if REDUCED_NETFLOW_FILES:
+    col_mapping = {'peer_src_ip': 0,
+                   'in_iface': 1,
+                   'src_ip': 2,
+                   'ts_end': 3,
+                   'sep' : " "
+                   }
+else:
+    col_mapping = {'peer_src_ip' : 1, 
+                   'in_iface' : 2,
+                   'src_ip': 4,
+                   'ts_end' : -3,
+                   'sep' : ","
+                   }
+
+
 # netflow_path="/data/slow/mehner/netflow/dummy_netflow.gz"
-ingresslink_file = "/data/slow/mehner/ipd/ingresslink/1605571200.gz"                # if we get more netflow, we should adjust the file 
-router_ip_mapping_file="/data/slow/mehner/ipd/router_lookup_tables/1605571200.txt"
+ingresslink_file = f"{base_path}/ingresslink/1605571200.gz"                # if we get more netflow, we should adjust the file 
+router_ip_mapping_file=f"{base_path}/router_lookup_tables/1605571200.txt"
 
 ###################################################
 ########### ROUTER NAME <--> IP MAPPING ###########
@@ -143,8 +155,8 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder = f"/data/slow/mehner/ipd/algo/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        self.tree_output_folder = f"/data/slow/mehner/ipd/algo/dump/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.output_folder = f"{base_path}/algo/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.tree_output_folder = f"{base_path}/algo/dump/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: 
             self.output_folder +="_TEST"
             if DUMP_TREE:
@@ -160,8 +172,8 @@ class IPD:
 
         ll = params.loglevel
         #if TEST: ll=logging.DEBUG
-        os.makedirs(f"/data/slow/mehner/ipd/algo/log/{RESULT_PREFIX}", exist_ok=True)
-        logfile = f"/data/slow/mehner/ipd/algo/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        os.makedirs(f"{base_path}/algo/log/{RESULT_PREFIX}", exist_ok=True)
+        logfile = f"{base_path}/algo/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
         logging.basicConfig(filename=logfile,
@@ -1205,23 +1217,24 @@ class IPD:
                 
             ram_counter+=1
             ####################################################
+            if not REDUCED_NETFLOW_FILES: line = line.rstrip()
 
-            line = line.rstrip().split(",")
-
-            router_name = router_ip_lookup_dict.get(line[1])
+            line = line.split(col_mapping.get('sep'))
+            router_name = router_ip_lookup_dict.get(line[col_mapping.get('peer_src_ip')])
             
             if IPv4_ONLY:
-                ip_version = 4 if not ":" in line[4] else 6
+                ip_version = 4 if not ":" in line[col_mapping.get('src_ip')] else 6
                 if ip_version == 6: continue
 
-            in_iface = line[2]
+            in_iface = line[col_mapping.get('in_iface')]
             
-            if len(line) < 15: continue
+            if not REDUCED_NETFLOW_FILES and len(line) < 15: continue
             
-            if line[-3] == "TIMESTAMP_END": continue
+            if line[col_mapping.get('ts_end')] == "TIMESTAMP_END":
+                continue
             if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
-            src_ip = line[4]    
-            cur_ts = int(int(line[-3]) / self.t) * self.t
+            src_ip = line[col_mapping.get('src_ip')]
+            cur_ts = int(int(line[col_mapping.get('ts_end')]) / self.t) * self.t
             added_counter +=1
 
 
