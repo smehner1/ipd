@@ -784,6 +784,7 @@ class IPD:
                 pass
 
         else: # 2) there is already a prevalent link
+
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['total'] += i_count # increment totals
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['prevalent_last_seen'] = int(last_seen)
         
@@ -1137,74 +1138,50 @@ class IPD:
         # start NF reader 
         if IPv4_ONLY:
             self.logger.warning("!!! IPv4 Traffic only !!!")
-        threading.Thread(target=self.read_netflow_worker, daemon=True).start()
 
-        # start ipd stuff 20s after nf rader starts
-        time.sleep(20)
-        self.logger.warning(f"start new study; current RAM usage {psutil.virtual_memory()[2]}%")
-        while True:
-            # time.sleep(1)
-            
-            cur_ts = list(self.netflow_data_dict.keys())
-            if len(cur_ts) == 0:
-                self.logger.critical("there is no data yet")
-                time.sleep(5)
-            else:
-                cur_ts = cur_ts[0] # dicts in python 3.x are reihenfolgeerhaltend, so lets try 
+        # start nf reader thread that fills netflow_data_dict
+        # threading.Thread(target=self.read_netflow_worker, daemon=True).start()
         
-            
-            if cur_ts == -1: 
-                self.logger.warning("IPD done")
-                break
+        # init generator 
+        nf_data = self.read_netflow()
+        last_ts = None
+        add_counter = 0
 
-            # ensure that at least two elements are inside
-            #keys > 2 oder -1 enthalten
+        # iterate over all netflow rows using our generator
+        for nf_row in nf_data:
+            # init
+            cur_ts = int(nf_row[0])
+            ingress = nf_row[1]
+            src_ip = nf_row[2]
+            masked_ip = self.mask_ip(src_ip)
 
-            if (len(self.netflow_data_dict.keys()) < 2) and (not -1 in self.netflow_data_dict.keys()): 
-                self.logger.info("dict empty - wait 5s")
-                time.sleep(5)
-                continue
-            
-            self.logger.debug("PROFILING: get netflow bucket from dict - start")
-            print(cur_ts)
-            
-            nf_data.clear()
-            nf_data= {}
-            nf_data = self.netflow_data_dict.pop(cur_ts)
+            # initial set current ts
+            if last_ts == None: last_ts = cur_ts
 
-            ## SMEHNER
+            # next epoch?
+            if cur_ts > last_ts: 
+                self.logger.debug(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter}") # #\tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
+                print(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter} ") # \tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
+                add_counter=0
 
-            # import json
-
-            # with open(f"{cur_ts}.json", "w") as outfile:
-            #     json.dump(nf_data, outfile)
-            tmp = self.netflow_data_dict.copy()
-            self.netflow_data_dict = {}
-            self.netflow_data_dict = tmp.copy()
-
-            self.logger.debug("PROFILING: get netflow bucket from dict - done")
-            # add flows to corresponding ranges 
-
-            self.logger.debug("PROFILING: add netflow to corresponding ranges - start")
-            for masked_ip in nf_data:
-                for ingress in nf_data[masked_ip]:
-                    icount= nf_data[masked_ip][ingress]
-                    if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: self.logger.debug(f"add to subnet: {cur_ts} {masked_ip} {ingress} {icount}")
-                    self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=icount)
-            
-            self.logger.debug("PROFILING: add netflow to corresponding ranges - done")
-            
-            self.logger.debug("PROFILING: run ipd - start")
-            self.run_ipd(cur_ts)
-            self.logger.debug("PROFILING: run ipd - done")
-
-
-            if (len(self.netflow_data_dict.keys()) == 0):
+                ### when current time bucket is fone -> add all new data to range / subnet and then run ipd!
+                self.logger.debug("PROFILING: add netflow to corresponding ranges - start")
+                # icount=1
+                # for masked_ip in nf_data:
+                #     for ingress in nf_data[masked_ip]:
+                #         icount= nf_data[masked_ip][ingress]
                 
-                time.sleep(5)
                 
-            self.logger.debug("ipd iteration done")
-        
+                self.logger.debug("PROFILING: add netflow to corresponding ranges - done")
+                self.run_ipd(cur_ts)
+
+                last_ts = cur_ts # next epoch
+
+            # still current epoch 
+            #self.netflow_data_dict[cur_ts][masked_ip][ingress] += 1         # add all masked_ip's with same router for current ts
+            if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: self.logger.debug(f"add to subnet: {cur_ts} {masked_ip} {ingress} {icount}")
+            self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=1)
+            add_counter+=1
 
 
     def read_netflow(self):
