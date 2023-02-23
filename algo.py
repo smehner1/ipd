@@ -1003,6 +1003,8 @@ class IPD:
             json.dump(self.subnet_dict, outfile, indent=4)
         with open(f"{self.tree_output_folder}/{current_ts}_bundles.json", "w") as outfile:
             json.dump(self.bundle_dict, outfile, indent=4)
+        with open(f"{self.tree_output_folder}/{current_ts}_range_lpm.json", "w") as outfile:
+            json.dump(self.range_lookup_dict, outfile, indent=4)
             
         self.logger.debug("PROFILING: dump tree to filesystem - done")
 
@@ -1046,6 +1048,14 @@ class IPD:
 
     def run_ipd(self, current_ts):
         
+        ##### try to free memory this way
+        for d in [self.subnet_dict, self.range_lookup_dict, self.ipd_cache]:
+            tmp = d.copy()
+            d = {}
+            d = tmp.copy()
+            tmp= {}
+
+
         # iterate over all already classified ranges
          # smehner -> fixed 
         # now go over all already classified ranges        
