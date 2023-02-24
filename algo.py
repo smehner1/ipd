@@ -29,6 +29,7 @@ RAM_CHECK_AFTER_N_LINES= 10000
 TEST=False
 IPv4_ONLY = False
 DUMP_TREE=True
+RESUME_ON_LAST_SAVEPOINT=True
 
 RESULT_PREFIX="parameter_study"
 
@@ -38,6 +39,9 @@ decay_ingmar_bucket_expire_keep_fraction=0.9
 linear_decay = 1000
 
 bundle_indicator=".b_"
+
+# this are the timestamp names of the nf files -> we can resume on that files 
+savepoints = {1605556860: True, 1605560460: True, 1605564060: True, 1605567660: True, 1605571260: True, 1605574860: True, 1605578460: True, 1605582060: True, 1605585660: True, 1605589260: True, 1605592860: True, 1605596460: True, 1605600060: True, 1605603660: True, 1605607260: True, 1605610860: True, 1605614460: True, 1605618060: True, 1605621660: True, 1605625260: True, 1605628860: True, 1605632460: True, 1605636060: True, 1605639660: True, 1605643260: True}
 
 t=60
 bucket_output = t *5
@@ -1003,9 +1007,25 @@ class IPD:
             json.dump(self.subnet_dict, outfile, indent=4)
         with open(f"{self.tree_output_folder}/{current_ts}_bundles.json", "w") as outfile:
             json.dump(self.bundle_dict, outfile, indent=4)
-        with open(f"{self.tree_output_folder}/{current_ts}_range_lpm.json", "w") as outfile:
-            json.dump(self.range_lookup_dict, outfile, indent=4)
+        with open(f"{self.tree_output_folder}/{current_ts}_cache.json", "w") as outfile:
+            json.dump(self.ipd_cache, outfile, indent=4)
             
+
+        ## semi automatically dump dict to file
+        
+            
+
+        tmp_dict = self.__multi_dict(2, int)
+
+        #get v4 and v6 lpm
+        for ipv in self.range_lookup_dict.keys():
+            # get all items
+            for item in list(self.range_lookup_dict[ipv]):
+                tmp_dict[ipv][item] = self.range_lookup_dict[ipv][item]
+        with open(f"{self.tree_output_folder}/{current_ts}_range_lpm.json", "w") as outfile:
+            json.dump(tmp_dict, outfile, indent=4)
+        tmp_dict.clear()
+        tmp_dict={}
         self.logger.debug("PROFILING: dump tree to filesystem - done")
 
 
