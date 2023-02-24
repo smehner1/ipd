@@ -14,6 +14,7 @@ import json
 import sys
 import psutil
 import socket
+import glob
 hostname=socket.gethostname()
 
 if hostname == 'bithouse':
@@ -22,8 +23,8 @@ elif hostname == 'manni':
     base_path = "/home/stefan/WORK/ipd"
 elif hostname == 'plum':
     base_path = "/home/mehneste/WORK/ipd"
-REDUCED_NETFLOW_FILES=True
 
+REDUCED_NETFLOW_FILES=True
 RAM_THRESHOLD=95     # %
 RAM_COOLDOWN_TIME=300 #sec
 RAM_CHECK_AFTER_N_LINES= 10000
@@ -43,7 +44,8 @@ linear_decay = 1000
 bundle_indicator=".b_"
 
 # this are the timestamp names of the nf files -> we can resume on that files 
-savepoints = {1605556860: True, 1605560460: True, 1605564060: True, 1605567660: True, 1605571260: True, 1605574860: True, 1605578460: True, 1605582060: True, 1605585660: True, 1605589260: True, 1605592860: True, 1605596460: True, 1605600060: True, 1605603660: True, 1605607260: True, 1605610860: True, 1605614460: True, 1605618060: True, 1605621660: True, 1605625260: True, 1605628860: True, 1605632460: True, 1605636060: True, 1605639660: True, 1605643260: True}
+savepoints = [1605556860, 1605560460, 1605564060, 1605567660, 1605571260, 1605574860, 1605578460, 1605582060, 1605585660, 1605589260, 1605592860, 1605596460,
+              1605600060, 1605603660, 1605607260, 1605610860, 1605614460, 1605618060, 1605621660, 1605625260, 1605628860, 1605632460, 1605636060, 1605639660, 1605643260]
 
 t=60
 bucket_output = t *5
@@ -101,7 +103,6 @@ print(len(ingresslink_dict))
 
 
 class IPD:    
-    
     def __subnet_atts(self):
         return {'last_seen': 0,  'ingress' : defaultdict(int), "total" : 0}
 
@@ -182,10 +183,13 @@ class IPD:
         logfile = f"{base_path}/algo/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
+
+        fmode="w"
+        if RESUME_ON_LAST_SAVEPOINT: fmode="a"
         logging.basicConfig(filename=logfile,
                         format='%(asctime)s %(levelname)s %(funcName)s %(message)s',
                         # datefmt='%y-%m-%d %H:%M:%S',
-                        filemode='w',
+                        filemode=fmode,
                         level=ll)
 
         # Creating an object
@@ -1169,7 +1173,7 @@ class IPD:
 
         if current_ts % bucket_output == 0: self.dump_classified_ranges_to_file(current_ts)
 
-        if DUMP_TREE and (current_ts % dump_output == 0): self.dump_tree_to_file(current_ts)
+        #if DUMP_TREE and (current_ts % dump_output == 0): self.dump_tree_to_file(current_ts)
 
         
 
@@ -1191,10 +1195,39 @@ class IPD:
         last_ts = None
         add_counter = 0
 
+
+        if RESUME_ON_LAST_SAVEPOINT:
+            # TODO load all dicts
+
+            ts_lst = []
+            for i in glob.glob(f"{self.tree_output_folder}/*_range*"):
+                ts_lst.append((int(i.split("/")[-1].split("_")[0])))
+            cur_state_ts = max(ts_lst)
+            with open(f"{self.tree_output_folder}/{ts}_bundles.{ext}", 'r') as j:
+                bundle_dict = json.loads(j.read())
+
+            with open(f"{self.tree_output_folder}/{ts}_cache.{ext}", 'r') as j:
+                ipd_cache = json.loads(j.read())
+
+
+            with open(f"{self.tree_output_folder}/{ts}.{ext}", 'r') as j:
+                subnet_dict = json.loads(j.read())
+
+            with open(f"{self.tree_output_folder}/{ts}_range_lpm.{ext}", 'r') as j:
+                d = json.loads(j.read())
+
+            for ipv in d.keys():
+                for prefix in d[ipv].keys():
+                    range_lookup_dict[int(ipv)].insert(prefix, d[ipv][prefix])
+
+            pass
         # iterate over all netflow rows using our generator
         for nf_row in nf_data:
             # init
             cur_ts = int(nf_row[0])
+
+            if cur_state_ts > cur_ts: continue
+        
             ingress = nf_row[1]
             src_ip = nf_row[2]
             masked_ip = self.mask_ip(src_ip)
@@ -1218,6 +1251,10 @@ class IPD:
                 
                 self.logger.debug("PROFILING: add netflow to corresponding ranges - done")
                 self.run_ipd(cur_ts)
+                if DUMP_TREE: 
+                    if len(savepoints) > 0 and  cur_ts >= savepoints[0]: 
+                        self.dump_tree_to_file(cur_ts)
+                        self.logger.warning(f"dump state at {cur_ts} to disk")
 
                 last_ts = cur_ts # next epoch
 
