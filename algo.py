@@ -20,6 +20,8 @@ if hostname == 'bithouse':
     base_path = "/data/slow/mehner/ipd"
 elif hostname == 'manni':
     base_path = "/home/stefan/WORK/ipd"
+elif hostname == 'plum':
+    base_path = "/home/mehneste/WORK/ipd"
 REDUCED_NETFLOW_FILES=True
 
 RAM_THRESHOLD=95     # %
