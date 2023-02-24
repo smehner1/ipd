@@ -15,6 +15,7 @@ import sys
 import signal
 import datetime
 import subprocess
+import psutil
 
 # sudo bash ~/WORK/masterthesis/ipd/collect_netflow.sh | sudo python3 algo.py -q 0.51 -c4 1 -c6 1 -cidrmax4 24
 # -cidrmax6 48 -e 500 -t 60
@@ -23,14 +24,18 @@ import subprocess
 MINI_SETUP = True
 TEST_MIN_SAMPLES = False
 
+RAM_THRESHOLD = 85     # %
+RAM_COOLDOWN_TIME = 300  # sec
+RAM_CHECK_AFTER_N_LINES = 10000
+
 TEST = False
 IPv4_ONLY = True
 DUMP_TREE = False
 
-RESULT_PREFIX = ""
+RESULT_PREFIX = "parameter_study"
 
 IPD_IDLE_BEFORE_START = 10
-PROCS = 90
+# PROCS = 90
 DEBUG_FLOW_OUTPUT = 100000
 decay_ingmar_bucket_expire_keep_fraction = 0.9
 linear_decay = 1000
@@ -451,8 +456,8 @@ class IPD:
             if p_ingress is not None and p_total is not None:  # there is a prevalent ingress yet
                 if p_total < 1:
                     pr = self.subnet_dict[ip_version][mask].pop(prange)
-                    self.logger.warning((f"p_total < 1: {ip_version} {mask} {prange} ingress:{p_ingress} "
-                                         f"total:{p_total} miss:{p_miss} - pop: {pr}"))
+                    self.logger.info((f"p_total < 1: {ip_version} {mask} {prange} ingress:{p_ingress} "
+                                      f"total:{p_total} miss:{p_miss} - pop: {pr}"))
 
                     return None
 
@@ -567,8 +572,16 @@ class IPD:
             # TODO if True -> probably join_siblings could be applied
             return True
         else:
-            x = self.subnet_dict[ip_version][mask].pop(prange)
-            self.logger.info(f"     NO -> remove all information for {prange}: {len(x)}")
+            # x = self.subnet_dict[ip_version][mask].pop(prange)
+            # self.logger.info(f"     NO -> remove all information for {prange}: {len(x)}")
+            try:
+                x = self.subnet_dict[ip_version][mask].pop(prange)
+                if bundle_indicator in current_prevalent:
+                    self.logger.info(f"remove {current_prevalent} from bundle_dict")
+                    self.bundle_dict.pop(current_prevalent)
+                    self.logger.info(f"     NO -> remove all information for {prange}: {len(x)}")
+            except Exception as e:
+                self.logger.warn(f" pop {prange} failed")
 
             return False
 
@@ -879,7 +892,12 @@ class IPD:
         # 0.1% of min samples for specific mask exponentially increasing by expired time buckets
         elif method == "stefan":
             s = self.__get_min_samples(ip_version, mask, decrement=True)
-            reduce = int(math.pow(s, (int(age/t)+1)))
+            reduce = 0
+            try:
+                reduce = int(math.pow(s, (int(age/t) + 1)))
+            except Exception as e:
+                pass
+
             misc -= reduce * (misc / totc)
             totc -= reduce
 
@@ -947,6 +965,11 @@ class IPD:
             if total_now < self.__get_min_samples(ip_version, mask):
                 self.logger.info(f"!!!  {ip_version} {mask} {prange} below min_samples -> remove all information")
                 self.subnet_dict[ip_version][mask].pop(prange)
+                # get current prevalent ingress to remove it from bundle dict if necessary
+                prevalent = self.subnet_dict[ip_version][mask][prange].get("prevalent")
+                if (prevalent is not None) and (bundle_indicator in prevalent):
+                    self.logger.info(f"remove {prevalent} from bundle_dict")
+                    self.bundle_dict.pop(prevalent)
         else:
             # #      unclassified prefixies      -> iterate over ip addresses and pop expired ones
             count_counter = 0
@@ -1142,7 +1165,7 @@ class IPD:
         threading.Thread(target=self.read_netflow_worker, daemon=True).start()
 
         # start ipd stuff 20s after nf rader starts
-        time.sleep(1)
+        time.sleep(20)
 
         while True:
             try:
@@ -1173,7 +1196,23 @@ class IPD:
                     continue
 
                 self.logger.debug("PROFILING: get netflow bucket from dict - start")
+
+                try:
+                    nf_data.clear()  # TODO: ERROR
+                except UnboundLocalError as e:
+                    pass
+                nf_data = {}
+
                 nf_data = self.netflow_data_dict.pop(cur_ts)
+
+                # # SMEHNER
+                # import json
+                # with open(f"{cur_ts}.json", "w") as outfile:
+                #     json.dump(nf_data, outfile)
+                tmp = self.netflow_data_dict.copy()
+                self.netflow_data_dict = {}
+                self.netflow_data_dict = tmp.copy()
+
                 self.logger.debug("PROFILING: get netflow bucket from dict - done")
                 # add flows to corresponding ranges
 
@@ -1200,6 +1239,7 @@ class IPD:
 
     def read_netflow(self):
         added_counter = 0
+        ram_counter = 0
         # for gzfile in gzfiles:
         #     with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
         #     with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
@@ -1207,6 +1247,20 @@ class IPD:
         for line in sys.stdin:
             # line = line.decode('utf-8').split(",")
             # print(line)
+            # ###################################################
+            # ###### CHECK RAM USAGE TO PREVENT FREEEZING #######
+            # ###################################################
+            if ram_counter >= RAM_CHECK_AFTER_N_LINES:
+                ram_counter = 0
+
+                if psutil.virtual_memory()[2] > RAM_THRESHOLD:
+                    self.logger.warning((f"RAM WARNING: currently {psutil.virtual_memory()[2]}"
+                                         f" in use -> cooldown for {RAM_COOLDOWN_TIME} seconds"))
+                    time.sleep(RAM_COOLDOWN_TIME)
+
+            ram_counter += 1
+            ####################################################
+
             line = line.rstrip().split(",")
 
             # print(line)
@@ -1304,7 +1358,7 @@ class IPD:
                 with open(f'{self.output_folder}/times.txt', 'a') as file:
                     file.write(f'Epoch End: {epoch_time}\n')
                     file.write(f'Execution: {exec_time}\n\n')
-                subprocess.call(f'./cpu_usage.sh {self.output_folder}', shell=True)
+                # subprocess.call(f'./cpu_usage.sh {self.output_folder}', shell=True)
 
             # add data for next t seconds
             # self.add_to_subnet(last_seen=cur_ts, ingress=ingress, ip=src_ip)
@@ -1366,7 +1420,8 @@ if __name__ == '__main__':
 
     if TEST:
         # params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
-        params = params(dataset, 10, 0.05, 120, 0.51, 1, 1, 28, 48, 'default', logging.DEBUG)
+        # params = params(dataset, 10, 0.05, 120, 0.51, 1, 1, 28, 48, 'default', logging.DEBUG)
+        params = params(dataset, 10, 0.05, 120, 0.51, 0.05, 1, 28, 48, 'default', logging.DEBUG)
     else:
         params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.DEBUG)
 
