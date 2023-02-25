@@ -1198,36 +1198,39 @@ class IPD:
 
         if RESUME_ON_LAST_SAVEPOINT:
             # TODO load all dicts
+            sucessfully_loaded=False
+            try:
+                ts_lst = []
+                for i in glob.glob(f"{self.tree_output_folder}/*_range*"):
+                    ts_lst.append((int(i.split("/")[-1].split("_")[0])))
+                cur_state_ts = max(ts_lst)
+                ext="json"
+                with open(f"{self.tree_output_folder}/{cur_state_ts}_bundles.{ext}", 'r') as j:
+                    bundle_dict = json.loads(j.read())
 
-            ts_lst = []
-            for i in glob.glob(f"{self.tree_output_folder}/*_range*"):
-                ts_lst.append((int(i.split("/")[-1].split("_")[0])))
-            cur_state_ts = max(ts_lst)
-            ext="json"
-            with open(f"{self.tree_output_folder}/{cur_state_ts}_bundles.{ext}", 'r') as j:
-                bundle_dict = json.loads(j.read())
-
-            with open(f"{self.tree_output_folder}/{cur_state_ts}_cache.{ext}", 'r') as j:
-                ipd_cache = json.loads(j.read())
+                with open(f"{self.tree_output_folder}/{cur_state_ts}_cache.{ext}", 'r') as j:
+                    ipd_cache = json.loads(j.read())
 
 
-            with open(f"{self.tree_output_folder}/{cur_state_ts}.{ext}", 'r') as j:
-                subnet_dict = json.loads(j.read())
+                with open(f"{self.tree_output_folder}/{cur_state_ts}.{ext}", 'r') as j:
+                    subnet_dict = json.loads(j.read())
 
-            with open(f"{self.tree_output_folder}/{cur_state_ts}_range_lpm.{ext}", 'r') as j:
-                d = json.loads(j.read())
+                with open(f"{self.tree_output_folder}/{cur_state_ts}_range_lpm.{ext}", 'r') as j:
+                    d = json.loads(j.read())
 
-            for ipv in d.keys():
-                for prefix in d[ipv].keys():
-                    self.range_lookup_dict[int(ipv)].insert(prefix, d[ipv][prefix])
-
-            pass
+                for ipv in d.keys():
+                    for prefix in d[ipv].keys():
+                        self.range_lookup_dict[int(ipv)].insert(prefix, d[ipv][prefix])
+                sucessfully_loaded = True
+            except:
+                pass
         # iterate over all netflow rows using our generator
         for nf_row in nf_data:
             # init
             cur_ts = int(nf_row[0])
 
-            if cur_state_ts > cur_ts: continue
+            if RESUME_ON_LAST_SAVEPOINT and sucessfully_loaded: 
+                if cur_state_ts > cur_ts: continue
         
             ingress = nf_row[1]
             src_ip = nf_row[2]
