@@ -1203,22 +1203,23 @@ class IPD:
             for i in glob.glob(f"{self.tree_output_folder}/*_range*"):
                 ts_lst.append((int(i.split("/")[-1].split("_")[0])))
             cur_state_ts = max(ts_lst)
-            with open(f"{self.tree_output_folder}/{ts}_bundles.{ext}", 'r') as j:
+            ext="json"
+            with open(f"{self.tree_output_folder}/{cur_state_ts}_bundles.{ext}", 'r') as j:
                 bundle_dict = json.loads(j.read())
 
-            with open(f"{self.tree_output_folder}/{ts}_cache.{ext}", 'r') as j:
+            with open(f"{self.tree_output_folder}/{cur_state_ts}_cache.{ext}", 'r') as j:
                 ipd_cache = json.loads(j.read())
 
 
-            with open(f"{self.tree_output_folder}/{ts}.{ext}", 'r') as j:
+            with open(f"{self.tree_output_folder}/{cur_state_ts}.{ext}", 'r') as j:
                 subnet_dict = json.loads(j.read())
 
-            with open(f"{self.tree_output_folder}/{ts}_range_lpm.{ext}", 'r') as j:
+            with open(f"{self.tree_output_folder}/{cur_state_ts}_range_lpm.{ext}", 'r') as j:
                 d = json.loads(j.read())
 
             for ipv in d.keys():
                 for prefix in d[ipv].keys():
-                    range_lookup_dict[int(ipv)].insert(prefix, d[ipv][prefix])
+                    self.range_lookup_dict[int(ipv)].insert(prefix, d[ipv][prefix])
 
             pass
         # iterate over all netflow rows using our generator
