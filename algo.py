@@ -168,7 +168,7 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder = (f"results{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-"
+        self.output_folder = (f"results_{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-"
                               f"{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}")
         self.tree_output_folder = (f"/test/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_"
                                    f"max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay"
@@ -190,8 +190,8 @@ class IPD:
 
         ll = params.loglevel
         # if TEST: ll=logging.DEBUG
-        os.makedirs(f"log{RESULT_PREFIX}", exist_ok=True)
-        logfile = (f"log{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-"
+        os.makedirs(f"log_{RESULT_PREFIX}", exist_ok=True)
+        logfile = (f"log_{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-"
                    f"{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}")
         if TEST:
             logfile += "_TEST"
