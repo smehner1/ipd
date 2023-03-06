@@ -8,6 +8,7 @@ import gzip
 import datetime
 import argparse
 import pandas as pd
+from datetime import datetime as dt
 
 
 def init_Parser() -> argparse.ArgumentParser:
@@ -97,13 +98,14 @@ def preprocess_netflow(file: str) -> pd.DataFrame:
             conv_dates_1: list = []
             conv_dates_2: list = []
 
+            # TODO: check ob hier alles richtig läuft
             for date in dates1:
-                date: float = time.mktime(datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timetuple())
-                conv_dates_1.append(int(str(date).strip(".0")))
+                date: int = int(datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S').timestamp())
+                conv_dates_1.append(int(str(date)))
 
             for date in dates2:
-                date: float = time.mktime(datetime.datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timetuple())
-                conv_dates_2.append(int(str(date).strip(".0")))
+                date: int = int(datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S').timestamp())
+                conv_dates_2.append(int(str(date)))
 
             df['ts_start'] = conv_dates_1
             df['ts_end'] = conv_dates_2

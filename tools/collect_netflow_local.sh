@@ -219,7 +219,7 @@ function collect_netflow {
     if [ $VERBOSE == 1 ]; then
         echo "|" -- preprocess collected netflow
     fi
-    /home/max/WORK/masterthesis/miniconda3/envs/mini/bin/python3 /home/max/WORK/masterthesis/ipd/preprocess_netflow_local.py -nf ${LOCAL_PATH} -outname ${COLLECTOR_LOCATION}/preprocessed_${SRC_FILE}
+    /home/max/WORK/masterthesis/miniconda3/envs/mini/bin/python3 /home/max/WORK/ipd-implementation/tools/preprocess_netflow_local.py -nf ${LOCAL_PATH} -outname ${COLLECTOR_LOCATION}/preprocessed_${SRC_FILE}
     exit_status=$?
     if [ $VERBOSE == 1 ]; then
         echo "|" -- finished preprocessing
