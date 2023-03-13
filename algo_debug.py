@@ -15,6 +15,8 @@ import sys
 import psutil
 import socket
 import glob
+import fileinput
+
 hostname=socket.gethostname()
 
 if hostname == 'bithouse':
@@ -32,9 +34,9 @@ RAM_CHECK_AFTER_N_LINES= 10000
 TEST=False
 IPv4_ONLY = False
 DUMP_TREE=False
-RESUME_ON_LAST_SAVEPOINT=True
+RESUME_ON_LAST_SAVEPOINT=False
 
-RESULT_PREFIX="parameter_study_plum"
+RESULT_PREFIX="algo_fi_py3"
 
 IPD_IDLE_BEFORE_START=10
 DEBUG_FLOW_OUTPUT = 100000
@@ -174,6 +176,15 @@ class IPD:
         if DUMP_TREE:
             os.makedirs(self.tree_output_folder, exist_ok=True)
 
+        # RESOURCE LOG
+        os.makedirs(f"{base_path}/algo/resource_log/{RESULT_PREFIX}", exist_ok=True)
+        self.resource_logfile = f"{base_path}/algo/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        if TEST:
+            self.resource_logfile += "_TEST"
+        self.resource_logfile += ".log"
+
+        self.init_resource_consumption_logfile()
+
         ############################################
         ########### LOGGER CONFIGURATION ###########
         ############################################
@@ -197,8 +208,44 @@ class IPD:
         self.logger = logging.getLogger()
 
 
+    def init_resource_consumption_logfile(self):
+        fmode = "w"
+        if RESUME_ON_LAST_SAVEPOINT:
+            fmode = "a"
 
-    
+        with open(self.resource_logfile, fmode, newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=',')
+            writer.writerow(['ts', 'ipd_ranges_count', 'ipd_cpu_runtime', 'iteration_cpu_runtime', 'ipd_runtime', 'iteration_runtime', 'ram_usage', 'shared_ram_usage', 'total_ram', 'avail_ram'])
+
+    def log_resource_consumption(self, cur_ts, range_count, ipd_cpu_runtime, iteration_cpu_runtime, ipd_runtime, iteration_runtime, ram_usage, ram_shared, ram_total, ram_avail):
+
+        with open(self.resource_logfile, 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=',')
+            writer.writerow([cur_ts, range_count, ipd_cpu_runtime, iteration_cpu_runtime, ipd_runtime, iteration_runtime, ram_usage, ram_shared, ram_total, ram_avail])
+
+
+
+    def get_ram_usage(self):
+
+        mem = psutil.virtual_memory()
+
+        # from src code:
+        #       This method returns the same information as memory_info(),
+        #       plus, on some platform(Linux, macOS, Windows), also provides
+        #       additional metrics(USS, PSS and swap).
+        #       The additional metrics provide a better representation of actual
+        #       process memory usage.
+        # rss         RSS       resident set size, the non-swapped physical; memory that a task has used ( in bytes)
+        ram_usage = int(self.process.memory_full_info().rss / 1024 / 1024)
+        #'mem_process_shared'
+        ram_shared= int(self.process.memory_full_info().shared / 1024 / 1024)
+        #'mem_node_total'
+        ram_total =int(mem.total / 1024 / 1024)
+        #'mem_node_available'
+        ram_avail = int(mem.available / 1024 / 1024)
+        return ram_usage, ram_shared, ram_total, ram_avail
+
+
 
 
 
@@ -1206,7 +1253,8 @@ class IPD:
         nf_data = self.read_netflow()
         last_ts = None
         add_counter = 0
-
+        ipd_t_end = 0
+        ipd_cpu_t_end = 0
 
         if RESUME_ON_LAST_SAVEPOINT:
             # TODO load all dicts
@@ -1266,7 +1314,37 @@ class IPD:
                 
                 
                 self.logger.debug("PROFILING: add netflow to corresponding ranges - done")
+
+                # measure time for ipd run
+                ipd_cpu_t_start = time.process_time()
+                ipd_t_start = time.time()
+
                 self.run_ipd(cur_ts)
+
+                last_ipd_cpu_t_end = ipd_cpu_t_end if ipd_cpu_t_end > 0 else time.process_time()
+                last_ipd_t_end = ipd_t_end if ipd_t_end > 0 else time.time()
+
+                ipd_cpu_t_end = time.process_time()
+                ipd_t_end = time.time()
+
+                ipd_cpu_runtime = ipd_cpu_t_end - ipd_cpu_t_start
+                ipd_runtime = ipd_t_end - ipd_t_start
+
+                iteration_runtime = ipd_t_end - last_ipd_t_end
+                iteration_cpu_runtime = ipd_cpu_t_end - last_ipd_cpu_t_end
+
+                print(f"IPD RUNTIME cpu: {ipd_cpu_runtime} wall: {ipd_runtime}")
+
+                # header of resource_logfile
+                # cur_ts, RAM usage from memory_info, RAM usage from memory_full_info, shared_ram, total_ram, availale_ram,
+                ram_usage, ram_shared, ram_total, ram_avail = self.get_ram_usage()
+                ranges_count = len(list(self.range_lookup_dict[4]) + list(self.range_lookup_dict[6]))
+                self.log_resource_consumption(cur_ts, ranges_count, f'{ipd_cpu_runtime:.4f}', f'{iteration_cpu_runtime:.4f}',
+                                            f'{ipd_runtime:.4f}', f'{iteration_runtime:.4f}', ram_usage, ram_shared, ram_total, ram_avail)
+
+
+
+
                 if DUMP_TREE: 
                     if len(savepoints) > 0 and  cur_ts >= savepoints[0]: 
                         self.dump_tree_to_file(cur_ts)
@@ -1298,8 +1376,7 @@ class IPD:
                 
                 if psutil.virtual_memory()[2] > RAM_THRESHOLD:
                     self.logger.warning(f"RAM WARNING: currently {psutil.virtual_memory()[2]} in use -> cooldown for {RAM_COOLDOWN_TIME} seconds")
-                    time.sleep(RAM_COOLDOWN_TIME)
-                
+                    time.sleep(RAM_COOLDOWN_TIME)             
             ram_counter+=1
             ####################################################
             if not REDUCED_NETFLOW_FILES: line = line.rstrip()
