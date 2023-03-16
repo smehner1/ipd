@@ -8,23 +8,24 @@ import io
 import os
 import argparse
 import logging
-import threading
+#import threading
 import time
 import json
 import sys
 import psutil
 import socket
 import glob
-import fileinput
 
 hostname=socket.gethostname()
 
 if hostname == 'bithouse':
-    base_path = "/data/slow/mehner/ipd"
+    base_path = "/data/slow/mehner/ipd"   
 elif hostname == 'manni':
     base_path = "/home/stefan/WORK/ipd"
 elif hostname == 'plum':
     base_path = "/home/mehneste/WORK/ipd"
+
+results_path=f"{base_path}/algo"
 
 REDUCED_NETFLOW_FILES=True
 RAM_THRESHOLD=95     # %
@@ -36,7 +37,7 @@ IPv4_ONLY = False
 DUMP_TREE=False
 RESUME_ON_LAST_SAVEPOINT=False
 
-RESULT_PREFIX="algo_fi_py3"
+RESULT_PREFIX="abc"
 
 IPD_IDLE_BEFORE_START=10
 DEBUG_FLOW_OUTPUT = 100000
@@ -165,8 +166,8 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder = f"{base_path}/algo/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        self.tree_output_folder = f"{base_path}/algo/dump/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.output_folder = f"{results_path}/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.tree_output_folder = f"{results_path}/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: 
             self.output_folder +="_TEST"
             if DUMP_TREE:
@@ -177,8 +178,8 @@ class IPD:
             os.makedirs(self.tree_output_folder, exist_ok=True)
 
         # RESOURCE LOG
-        os.makedirs(f"{base_path}/algo/resource_log/{RESULT_PREFIX}", exist_ok=True)
-        self.resource_logfile = f"{base_path}/algo/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        os.makedirs(f"{results_path}/resource_log/{RESULT_PREFIX}", exist_ok=True)
+        self.resource_logfile = f"{results_path}/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST:
             self.resource_logfile += "_TEST"
         self.resource_logfile += ".log"
@@ -191,8 +192,8 @@ class IPD:
 
         ll = params.loglevel
         #if TEST: ll=logging.DEBUG
-        os.makedirs(f"{base_path}/algo/log/{RESULT_PREFIX}", exist_ok=True)
-        logfile = f"{base_path}/algo/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        os.makedirs(f"{results_path}/log/{RESULT_PREFIX}", exist_ok=True)
+        logfile = f"{results_path}/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
 
@@ -1354,7 +1355,7 @@ class IPD:
 
             # still current epoch 
             #self.netflow_data_dict[cur_ts][masked_ip][ingress] += 1         # add all masked_ip's with same router for current ts
-            if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: self.logger.debug(f"add to subnet: {cur_ts} {masked_ip} {ingress} {icount}")
+            if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: self.logger.debug(f"add to subnet: {cur_ts} {masked_ip} {ingress} 1")
             self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=1)
             add_counter+=1
 
