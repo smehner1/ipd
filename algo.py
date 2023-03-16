@@ -25,7 +25,8 @@ elif hostname == 'manni':
 elif hostname == 'plum':
     base_path = "/home/mehneste/WORK/ipd"
 
-results_path=f"{base_path}/algo"
+results_path=f"{base_path}/results"
+RESULT_PREFIX = f"parameter_study_{hostname}"
 
 REDUCED_NETFLOW_FILES=True
 RAM_THRESHOLD=95     # %
@@ -37,7 +38,7 @@ IPv4_ONLY = False
 DUMP_TREE=False
 RESUME_ON_LAST_SAVEPOINT=False
 
-RESULT_PREFIX="parameter_stduy_bithouse"
+
 
 IPD_IDLE_BEFORE_START=10
 DEBUG_FLOW_OUTPUT = 100000
@@ -166,7 +167,7 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder = f"{results_path}/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
+        self.output_folder = f"{results_path}/range/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
         self.tree_output_folder = f"{results_path}/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
         if TEST: 
             self.output_folder +="_TEST"
