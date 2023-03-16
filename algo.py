@@ -166,8 +166,8 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder = f"{results_path}/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        self.tree_output_folder = f"{results_path}/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.output_folder = f"{results_path}/results/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
+        self.tree_output_folder = f"{results_path}/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
         if TEST: 
             self.output_folder +="_TEST"
             if DUMP_TREE:
@@ -179,7 +179,7 @@ class IPD:
 
         # RESOURCE LOG
         os.makedirs(f"{results_path}/resource_log/{RESULT_PREFIX}", exist_ok=True)
-        self.resource_logfile = f"{results_path}/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.resource_logfile = f"{results_path}/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
         if TEST:
             self.resource_logfile += "_TEST"
         self.resource_logfile += ".log"
@@ -193,7 +193,7 @@ class IPD:
         ll = params.loglevel
         #if TEST: ll=logging.DEBUG
         os.makedirs(f"{results_path}/log/{RESULT_PREFIX}", exist_ok=True)
-        logfile = f"{results_path}/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        logfile = f"{results_path}/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
 
