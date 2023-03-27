@@ -4,7 +4,7 @@ import pandas as pd
 
 links_file = '~/WORK/mini-internet/platform/config/external_links_config.txt'
 
-frame = pd.read_csv(links_file, delim_whitespace=True)
+frame = pd.read_csv(links_file, delim_whitespace=True, header=None)
 frame.columns = [
     'src_as',
     'src_router',

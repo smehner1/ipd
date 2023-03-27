@@ -4,7 +4,7 @@ import pandas as pd
 
 links_file = '/home/max/WORK/mini-internet/platform/config/external_links_config.txt'
 
-frame = pd.read_csv(links_file, delim_whitespace=True)
+frame = pd.read_csv(links_file, delim_whitespace=True, header=None)
 frame.columns = [
     'src_as',
     'src_router',
@@ -18,9 +18,13 @@ frame.columns = [
 ]
 
 ingress = '/home/max/WORK/ipd-implementation/ingresslink/mini-internet'
+ingress_netflow_collector = '/home/max/WORK/ipd-implementation/ingresslink/mini-internet-test.txt'
 
 file = open(ingress, 'w')
 file = open(ingress, 'a')
+
+file2 = open(ingress_netflow_collector, 'w')
+file2 = open(ingress_netflow_collector, 'a')
 
 for i in range(frame.shape[0]):
     row = frame.iloc[i]
@@ -30,3 +34,5 @@ for i in range(frame.shape[0]):
 
     line = f'PEER_SRC_IP={src_router},IN_IFACE=ext_{dst_as}_{dst_router},&={dst_as}\n'
     file.write(line)
+    line = f'PEER_SRC_IP={src_router}    IN_IFACE=ext_{dst_as}_{dst_router}    &=1\n'
+    file2.write(line)
