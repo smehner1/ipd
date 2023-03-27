@@ -7,8 +7,11 @@ import time
 import gzip
 import datetime
 import argparse
+import subprocess
 import pandas as pd
 from datetime import datetime as dt
+
+LOG_FILE: str = '/home/max/WORK/ipd-implementation/tmp.txt'
 
 
 def init_Parser() -> argparse.ArgumentParser:
@@ -50,71 +53,73 @@ def preprocess_netflow(file: str) -> pd.DataFrame:
     '''
 
     try:
-        with gzip.open(file, 'rb') as f:
-            df: pd.DataFrame = pd.read_csv(f)
-            # select only needed columns
-            df: pd.DataFrame = df[[
-                'smk',
-                'dmk',
-                'sp',
-                'dp',
-                'sa',
-                'da',
-                'sp',
-                'dp',
-                'pr',
-                'flg',
-                'td',
-                'ts',
-                'te',
-                'ipkt',
-                'ibyt'
-            ]]
-            # rename the columns corresponding to the needed names of algo.py
-            df.columns: list = [
-                'tag',
-                'peer_src_ip',
-                'in_iface',
-                'out_iface',
-                'src_ip',
-                'dst_net',
-                'src_port',
-                'dst_port',
-                'proto',
-                '__',
-                '_',
-                'ts_start',
-                'ts_end',
-                'pkts',
-                'bytes'
-            ]
-            # remove summarization
-            df: pd.DataFrame = df[:-3]
+        df: pd.DataFrame = pd.read_csv(
+            file,
+            compression='gzip',
+            dtype=object)
 
-            # convert all dates into unix timestamps
-            dates1: pd.Series = df['ts_start']
-            dates2: pd.Series = df['ts_end']
+        # select only needed columns
+        df: pd.DataFrame = df[[
+            'smk',
+            'dmk',
+            'sp',
+            'dp',
+            'sa',
+            'da',
+            'sp',
+            'dp',
+            'pr',
+            'flg',
+            'td',
+            'ts',
+            'te',
+            'ipkt',
+            'ibyt'
+        ]]
+        # rename the columns corresponding to the needed names of algo.py
+        df.columns: list = [
+            'tag',
+            'peer_src_ip',
+            'in_iface',
+            'out_iface',
+            'src_ip',
+            'dst_net',
+            'src_port',
+            'dst_port',
+            'proto',
+            '__',
+            '_',
+            'ts_start',
+            'ts_end',
+            'pkts',
+            'bytes'
+        ]
+        # remove summarization
+        df: pd.DataFrame = df[:-3]
 
-            conv_dates_1: list = []
-            conv_dates_2: list = []
+        # convert all dates into unix timestamps
+        dates1: pd.Series = df['ts_start']
+        dates2: pd.Series = df['ts_end']
 
-            # TODO: check ob hier alles richtig läuft
-            for date in dates1:
-                date: int = int(datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S').timestamp())
-                conv_dates_1.append(int(str(date)))
+        conv_dates_1: list = []
+        conv_dates_2: list = []
 
-            for date in dates2:
-                date: int = int(datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S').timestamp())
-                conv_dates_2.append(int(str(date)))
+        for date in dates1:
+            date: int = int(datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S').timestamp())
+            conv_dates_1.append(int(str(date)))
 
-            df['ts_start'] = conv_dates_1
-            df['ts_end'] = conv_dates_2
+        for date in dates2:
+            date: int = int(datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S').timestamp())
+            conv_dates_2.append(int(str(date)))
 
-            # detemine the ingress router, from which the netflow was collected by splitting the file name
-            peer: str = file.split('/')[-1].split('_')[1]
-            df['peer_src_ip'] = peer
-            df['in_iface'] = (f"{file.split('/')[-1].split('_')[2]}_{file.split('/')[-1].split('_')[3]}_"
-                              f"{file.split('/')[-1].split('_')[4]}")
+        df['ts_start'] = conv_dates_1
+        df['ts_end'] = conv_dates_2
+
+        # detemine the ingress router, from which the netflow was collected by splitting the file name
+        peer: str = file.split('/')[-1].split('_')[1]
+        df['peer_src_ip'] = peer
+        df['in_iface'] = (f"{file.split('/')[-1].split('_')[2]}_{file.split('/')[-1].split('_')[3]}_"
+                          f"{file.split('/')[-1].split('_')[4]}")
         return df
     except ValueError as e:
         print('The Data could not be read. Maybe there was no netflow collected!')
@@ -144,6 +149,12 @@ def preprocess_netflows(args: argparse.Namespace) -> pd.DataFrame:
     return concat
 
 
+def remove_collected_netflow() -> None:
+    files = pd.read_csv(LOG_FILE, header=None)
+    for file in files[0]:
+        subprocess.run(f'rm -r {file}', shell=True)
+
+
 if __name__ == '__main__':
     try:
         parser: argparse.ArgumentParser = init_Parser()
@@ -158,6 +169,7 @@ if __name__ == '__main__':
                 index=False,
                 compression={'method': 'gzip', 'compresslevel': 1, 'mtime': 1}
             )
+            remove_collected_netflow()
             sys.exit(0)
         else:
             outname: str = args.outname.replace('.csv.gz', '')  # be save to have no existing file ending with .csv.gz
@@ -166,6 +178,7 @@ if __name__ == '__main__':
                 index=False,
                 compression={'method': 'gzip', 'compresslevel': 1, 'mtime': 1}
             )
+            remove_collected_netflow()
             sys.exit(1)
     except KeyboardInterrupt:  # catch a possible Keyboard Interrupt to finish the IPD Algorithm correctly
         exit
