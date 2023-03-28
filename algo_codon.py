@@ -1,5 +1,5 @@
 import csv
-import gzip
+from gzip import open as gopen
 import pytricia
 from netaddr import *
 from collections import defaultdict, namedtuple
@@ -11,22 +11,36 @@ import logging
 #import threading
 from time import sleep, process_time, time
 from json import load, dump
-from sys import stdin
+#from sys import stdin
 import psutil
 import socket
 from glob import glob
+import codon
 
 hostname=socket.gethostname()
 
+gzfiles = ["@000000000000001605556860.gz", "@000000000000001605560460.gz", "@000000000000001605564060.gz",
+           "@000000000000001605567660.gz", "@000000000000001605571260.gz", "@000000000000001605574860.gz",
+           "@000000000000001605578460.gz", "@000000000000001605582060.gz", "@000000000000001605585660.gz",
+           "@000000000000001605589260.gz", "@000000000000001605592860.gz", "@000000000000001605596460.gz",
+           "@000000000000001605600060.gz", "@000000000000001605603660.gz", "@000000000000001605607260.gz",
+           "@000000000000001605610860.gz", "@000000000000001605614460.gz", "@000000000000001605618060.gz",
+           "@000000000000001605621660.gz", "@000000000000001605625260.gz", "@000000000000001605628860.gz",
+           "@000000000000001605632460.gz", "@000000000000001605636060.gz", "@000000000000001605639660.gz",
+           "@000000000000001605643260.gz"]
+
+
 if hostname == 'bithouse':
     base_path = "/data/slow/mehner/ipd"   
+    input_path = "/data/slow/mehner/ipd/netflow_merged_sorted_reduced"
 elif hostname == 'manni':
     base_path = "/home/stefan/WORK/ipd"
 elif hostname == 'plum':
     base_path = "/home/mehneste/WORK/ipd"
 
 results_path=f"{base_path}/ipd_algo_results"
-RESULT_PREFIX = f"parameter_study_0.99_{hostname}"
+
+RESULT_PREFIX = f"codon"
 
 REDUCED_NETFLOW_FILES=True
 RAM_THRESHOLD=95     # %
@@ -93,7 +107,7 @@ with open(router_ip_mapping_file, 'r') as csv_file:
 print("> load ingresslink file")
 
 ingresslink_dict= {}
-with gzip.open("{}".format(ingresslink_file), 'rb') as f:
+with gopen("{}".format(ingresslink_file), 'rb') as f:
     for line in f:
         line = line.decode('utf-8').split(",")
         router= line[0].replace("PEER_SRC_IP=", "")
@@ -1094,7 +1108,7 @@ class IPD:
         output_file = f"{self.output_folder}/range.{current_ts}.gz"
 
         self.logger.info(f"dump to file: {output_file}")
-        with gzip.open(output_file, 'wb') as ipd_writer:
+        with gopen(output_file, 'wb') as ipd_writer:
             # Needs to be a bytestring in Python 3
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
                 #encode.write("test")
@@ -1360,49 +1374,49 @@ class IPD:
             self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=1)
             add_counter+=1
 
-
+    @codon.jit
     def read_netflow(self):
         added_counter=0
         ram_counter=0
-        #for gzfile in gzfiles:
-            #with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
-            #with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
-        for line in stdin:
+        # for line in stdin:
+        #with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
+        with gopen(f"/data/slow/mehner/ipd/netflow_merged_sorted_reduced/@000000000000001605556860.gz", 'rb') as f:
+            for line in f:
             #line = line.decode('utf-8').split(",")
 
-            ####################################################
-            ####### CHECK RAM USAGE TO PREVENT FREEEZING #######
-            ####################################################
-            if ram_counter >= RAM_CHECK_AFTER_N_LINES:
-                ram_counter =0
+                ####################################################
+                ####### CHECK RAM USAGE TO PREVENT FREEEZING #######
+                ####################################################
+                if ram_counter >= RAM_CHECK_AFTER_N_LINES:
+                    ram_counter =0
+                    
+                    if psutil.virtual_memory()[2] > RAM_THRESHOLD:
+                        self.logger.warning(f"RAM WARNING: currently {psutil.virtual_memory()[2]} in use -> cooldown for {RAM_COOLDOWN_TIME} seconds")
+                        sleep(RAM_COOLDOWN_TIME)             
+                ram_counter+=1
+                ####################################################
+                if not REDUCED_NETFLOW_FILES: line = line.rstrip()
+
+                line = line.split(col_mapping.get('sep'))
+                router_name = router_ip_lookup_dict.get(line[col_mapping.get('peer_src_ip')])
                 
-                if psutil.virtual_memory()[2] > RAM_THRESHOLD:
-                    self.logger.warning(f"RAM WARNING: currently {psutil.virtual_memory()[2]} in use -> cooldown for {RAM_COOLDOWN_TIME} seconds")
-                    sleep(RAM_COOLDOWN_TIME)             
-            ram_counter+=1
-            ####################################################
-            if not REDUCED_NETFLOW_FILES: line = line.rstrip()
+                if IPv4_ONLY:
+                    ip_version = 4 if not ":" in line[col_mapping.get('src_ip')] else 6
+                    if ip_version == 6: continue
 
-            line = line.split(col_mapping.get('sep'))
-            router_name = router_ip_lookup_dict.get(line[col_mapping.get('peer_src_ip')])
-            
-            if IPv4_ONLY:
-                ip_version = 4 if not ":" in line[col_mapping.get('src_ip')] else 6
-                if ip_version == 6: continue
-
-            in_iface = line[col_mapping.get('in_iface')]
-            
-            if not REDUCED_NETFLOW_FILES and len(line) < 15: continue
-            
-            if line[col_mapping.get('ts_end')] == "TIMESTAMP_END":
-                continue
-            if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
-            src_ip = line[col_mapping.get('src_ip')]
-            cur_ts = int(int(line[col_mapping.get('ts_end')]) / self.t) * self.t
-            added_counter +=1
+                in_iface = line[col_mapping.get('in_iface')]
+                
+                if not REDUCED_NETFLOW_FILES and len(line) < 15: continue
+                
+                if line[col_mapping.get('ts_end')] == "TIMESTAMP_END":
+                    continue
+                if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
+                src_ip = line[col_mapping.get('src_ip')]
+                cur_ts = int(int(line[col_mapping.get('ts_end')]) / self.t) * self.t
+                added_counter +=1
 
 
-            yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
+                yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
                     
     def read_netflow_worker(self):
         print("start read_netflow_worker ")
