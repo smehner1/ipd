@@ -162,14 +162,15 @@ if __name__ == '__main__':
 
         netflows: pd.DataFrame = preprocess_netflows(args)
         if not netflows.empty:
-            netflows.sort_values(by=['ts_start'], inplace=True)
+            # netflows.sort_values(by=['ts_start'], inplace=True)
+            netflows.sort_values(by=['ts_end'], inplace=True)
             outname: str = args.outname.replace('.csv.gz', '')  # be save to have no existing file ending with .csv.gz
             netflows.to_csv(
                 outname + '.csv.gz',
                 index=False,
                 compression={'method': 'gzip', 'compresslevel': 1, 'mtime': 1}
             )
-            remove_collected_netflow()
+            # remove_collected_netflow()
             sys.exit(0)
         else:
             outname: str = args.outname.replace('.csv.gz', '')  # be save to have no existing file ending with .csv.gz
@@ -178,7 +179,7 @@ if __name__ == '__main__':
                 index=False,
                 compression={'method': 'gzip', 'compresslevel': 1, 'mtime': 1}
             )
-            remove_collected_netflow()
+            # remove_collected_netflow()
             sys.exit(1)
     except KeyboardInterrupt:  # catch a possible Keyboard Interrupt to finish the IPD Algorithm correctly
         exit

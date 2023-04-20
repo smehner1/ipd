@@ -18,7 +18,7 @@ frame.columns = [
 ]
 
 ingress = '/home/max/WORK/ipd-implementation/ingresslink/mini-internet'
-ingress_netflow_collector = '/home/max/WORK/ipd-implementation/ingresslink/mini-internet-test.txt'
+ingress_netflow_collector = '/home/max/WORK/ipd-implementation/ingresslink/mini-internet.txt'
 
 file = open(ingress, 'w')
 file = open(ingress, 'a')

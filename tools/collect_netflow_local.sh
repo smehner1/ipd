@@ -3,7 +3,8 @@
 # echo "##### STARTING NETFLOW COLLECTION #####"
 
 # the time (in sec) between each lookup for new netflow (should be the same like the nfdump interval)
-INTERVAL=60  # given in seconds
+# INTERVAL=60  # given in seconds
+INTERVAL=300  # given in seconds
 # the AS from which the netflow should be collected
 AS=1
 
@@ -12,8 +13,12 @@ TEST=0
 VERBOSE=0
 
 # read possible flags, otherwise use default values
-while getopts "i:a:tv" OPTION; do
+while getopts "o:i:a:tv" OPTION; do
     case "$OPTION" in
+        o)
+            ivalue="$OPTARG"
+            FIRST=$ivalue
+            ;;
         i)
             ivalue="$OPTARG"
             INTERVAL=$ivalue
@@ -104,7 +109,49 @@ function collect_netflow {
     fi
 
     HOUR=${TIME_ARR[0]}
-    MIN=$((TIME_ARR[1]-5))
+    # HOUR=14
+    MIN=${TIME_ARR[1]}
+    MIN=$((MIN))
+
+    if [ $MIN -lt 10 ]; then
+        MIN=0${MIN}
+    fi
+
+    # MIN="15"
+    # echo ${HOUR}:${MIN}
+
+    # bring minute to wanted interval minute (e.g. 2 and 7 for interval of 5 min)
+    LAST_NUM=${MIN:1:1}
+    LAST_NUM=$((LAST_NUM))
+    # echo $LAST_NUM
+    if [ $LAST_NUM == 0 ]; then
+        LAST_NUM=1$LAST_NUM
+    fi
+
+    # FIRST=2
+    LAST=$((FIRST+5))  # =7
+
+    # echo $LAST_NUM
+    if [ $LAST_NUM != $FIRST ] || [ $LAST_NUM != $LAST ]; then
+        offset=$((LAST_NUM-FIRST))
+        if [ $offset -lt 0 ]; then
+            offset=$((offset+5))
+        else
+            offset=$((offset%5))
+        fi
+    else
+        offset=0
+    fi
+
+    # echo $offset
+    # echo $MIN
+    MIN=$(sed 's/^0*//'<<< $MIN)  # remove leading zero
+    MIN=$((MIN-offset))
+    # echo $MIN
+
+    # set MIN 5 minutes back
+    MIN=$((MIN-5))
+    # echo $MIN
 
     if [ ${MIN} -lt 0 ]; then
         MIN=$((MIN+60))
@@ -177,9 +224,17 @@ function collect_netflow {
         inface="${lookup[2]}"
 
         if [ ${MIN} -lt 10 ]; then
-            DST_FILE=${as}_${router}_${inface}_${YEAR}${MONTH}${DAY}${HOUR}0${MIN}
+            if [ ${HOUR} -lt 10 ]; then
+                DST_FILE=${as}_${router}_${inface}_${YEAR}${MONTH}${DAY}0${HOUR}0${MIN}
+            else
+                DST_FILE=${as}_${router}_${inface}_${YEAR}${MONTH}${DAY}${HOUR}0${MIN}
+            fi
         else
-            DST_FILE=${as}_${router}_${inface}_${YEAR}${MONTH}${DAY}${HOUR}${MIN}
+            if [ ${HOUR} -lt 10 ]; then
+                DST_FILE=${as}_${router}_${inface}_${YEAR}${MONTH}${DAY}0${HOUR}${MIN}
+            else
+                DST_FILE=${as}_${router}_${inface}_${YEAR}${MONTH}${DAY}${HOUR}${MIN}
+            fi
         fi
 
         CONTAINER="${as}"_"${router}"router
@@ -203,7 +258,8 @@ function collect_netflow {
             echo "|" $LOCAL_FILE
         fi
 
-        cp ${SRC_PATH}/nfcapd.${SRC_FILE} ${LOCAL_FILE}
+        # cp ${SRC_PATH}/nfcapd.${SRC_FILE} ${LOCAL_FILE}
+        mv ${SRC_PATH}/nfcapd.${SRC_FILE} ${LOCAL_FILE}
         echo ${SRC_PATH}/nfcapd.${SRC_FILE} >> tmp.txt
         # docker cp ${CONTAINER}:${SRC_PATH}/nfcapd.${SRC_FILE}  ${LOCAL_FILE}
 
@@ -217,6 +273,7 @@ function collect_netflow {
     #     preprocess all extracted files     -------------------------------------------------------------------------------
     # ----------------------------------------------------------------------------------------------------------------------
 
+    sleep 10  # TODO: check if this helps solving the error with ENDOFFILE and no such file
     if [ $VERBOSE == 1 ]; then
         echo "|" -- preprocess collected netflow
     fi
@@ -227,7 +284,7 @@ function collect_netflow {
     fi
 
     rm -rf ${LOCAL_PATH}
-    > tmp.txt
+    # > tmp.txt
 
     # if we are in the usage case output the resulting preprocessed netflow
     if [ $VERBOSE == 0 ]; then
@@ -236,6 +293,11 @@ function collect_netflow {
         zcat ${COLLECTOR_LOCATION}/preprocessed_${SRC_FILE}.csv.gz
         # fi
     fi
+
+    # TODO: after printing the data connect it to the already collected data
+    # /home/max/WORK/masterthesis/miniconda3/envs/mini/bin/python3 /home/max/WORK/ipd-implementation/tools/connect_netflow.py 0
+    # delete the added single netflow file
+    # rm ${COLLECTOR_LOCATION}/preprocessed_${SRC_FILE}.csv.gz
 }
 
 # infinitly collect every $INTERVAL seconds the netflow
