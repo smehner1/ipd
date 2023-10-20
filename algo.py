@@ -32,7 +32,8 @@ TEST = False
 IPv4_ONLY = True
 DUMP_TREE = False
 
-RESULT_PREFIX = "parameter_study"
+# RESULT_PREFIX = "parameter_study"
+RESULT_PREFIX = "test"
 
 IPD_IDLE_BEFORE_START = 10
 # PROCS = 90
@@ -1423,7 +1424,7 @@ if __name__ == '__main__':
         # params = params(dataset, 10, 0.05, 120, 0.51, 1, 1, 28, 48, 'default', logging.DEBUG)
         params = params(dataset, 10, 0.05, 120, 0.51, 0.05, 1, 28, 48, 'default', logging.DEBUG)
     else:
-        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, logging.DEBUG)
+        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, args.loglevel)
 
     # print(router_ip_lookup_dict)
 
