@@ -1,7 +1,9 @@
 #!/bin/bash
 
-PYTHON="/home/max/WORK/masterthesis/miniconda3/envs/mini/bin/python3"
-MINIDIR="/home/max/WORK/mini-internet/"  # directory that includes the mini internet
+conda=$1
+
+PYTHON="${conda}/envs/mini-ipd/bin/python3"
+MINIDIR="../mini-internet/"  # directory that includes the mini internet
 IPDDIR=$(pwd)  # "/home/max/WORK/ipd-implementation/"
 
 # read possible flags, otherwise use default values

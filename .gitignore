@@ -2,3 +2,4 @@ results*
 log*
 
 netflow*
+*/__pycache__/*

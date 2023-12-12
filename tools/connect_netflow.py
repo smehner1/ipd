@@ -11,7 +11,7 @@ def init_parser() -> argparse.ArgumentParser:
     parser.add_argument('--netdir',
                         help='path to directory with single netflow files',
                         type=str,
-                        default='/home/max/WORK/ipd-implementation/netflow/mini/',
+                        default='../ipd-implementation/netflow/mini/',
                         )
 
     return parser
@@ -38,6 +38,7 @@ def main() -> None:
             continue
 
     # connect them all together
+    print(len(frames))
     connected: pd.DataFrame = pd.concat(frames, ignore_index=True)
 
     # save with start and end date of collection range

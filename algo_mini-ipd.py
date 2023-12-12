@@ -35,7 +35,7 @@ elif hostname == 'manni':
 elif hostname == 'plum':
     base_path = "/home/mehneste/WORK/ipd"
 elif hostname == 'mittelerde':
-    base_path = "/home/max/WORK/ipd-implementation"
+    base_path = "/home/max/WORK/mini-ipd/ipd-implementation"
 
 REDUCED_NETFLOW_FILES = False
 RAM_THRESHOLD = 95  # %
