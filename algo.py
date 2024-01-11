@@ -6,55 +6,34 @@ from collections import defaultdict, namedtuple
 import math
 import io
 import os
-import argparse
-import logging
-#import threading
 from time import sleep, process_time, time
 from json import load, dump
 from sys import stdin
 import psutil
-import socket
-from glob import glob
+import argparse
+import configparser
+import logging
 
-hostname=socket.gethostname()
-
-if hostname == 'bithouse':
-    base_path = "/data/slow/mehner/ipd"   
-elif hostname == 'manni':
-    base_path = "/home/stefan/WORK/ipd"
-elif hostname == 'plum':
-    base_path = "/home/mehneste/WORK/ipd"
-
-results_path=f"{base_path}/ipd_algo_results"
-RESULT_PREFIX = f"parameter_study_0.99_{hostname}"
+results_path="./ipd_algo_results_publish"
+RESULT_PREFIX = "publication"
 
 REDUCED_NETFLOW_FILES=True
-RAM_THRESHOLD=95     # %
-RAM_COOLDOWN_TIME=300 #sec
-RAM_CHECK_AFTER_N_LINES= 10000
 
 TEST=False
 IPv4_ONLY = False
 DUMP_TREE=False
-RESUME_ON_LAST_SAVEPOINT=False
-
-
 
 IPD_IDLE_BEFORE_START=10
 DEBUG_FLOW_OUTPUT = 100000
-decay_ingmar_bucket_expire_keep_fraction=0.9
-linear_decay = 1000
+default_decay_keep_fraction=0.9 #
+linear_decay = 1000 
 
 bundle_indicator=".b_"
-
-# this are the timestamp names of the nf files -> we can resume on that files 
-savepoints = [1605556860, 1605560460, 1605564060, 1605567660, 1605571260, 1605574860, 1605578460, 1605582060, 1605585660, 1605589260, 1605592860, 1605596460,
-              1605600060, 1605603660, 1605607260, 1605610860, 1605614460, 1605618060, 1605621660, 1605625260, 1605628860, 1605632460, 1605636060, 1605639660, 1605643260]
 
 t=60
 bucket_output = t *5
 dump_output = 1800 # 30min
-b= 0.05         # allowed delta between bundle load
+
 
 
 cols=['tag', 'peer_src_ip', 'in_iface', 'out_iface', 'src_ip', 'dst_net', 'src_port', 'dst_port', 'proto', '__', '_', 'ts_start', 'ts_end', 'pkts', 'bytes']
@@ -75,36 +54,10 @@ else:
                    }
 
 
-# netflow_path="/data/slow/mehner/netflow/dummy_netflow.gz"
-ingresslink_file = f"{base_path}/ingresslink/1605571200.gz"                # if we get more netflow, we should adjust the file 
-router_ip_mapping_file=f"{base_path}/router_lookup_tables/1605571200.txt"
 
 ###################################################
 ########### ROUTER NAME <--> IP MAPPING ###########
 ###################################################
-with open(router_ip_mapping_file, 'r') as csv_file:
-    router_ip_mapping_csv = csv.reader(csv_file, delimiter=' ')
-    router_ip_lookup_dict = {rows[0]:rows[1] for rows in router_ip_mapping_csv}
-
-###################################################
-###########     INGRESS LINK FILE       ###########
-###################################################
-
-print("> load ingresslink file")
-
-ingresslink_dict= {}
-with gzip.open("{}".format(ingresslink_file), 'rb') as f:
-    for line in f:
-        line = line.decode('utf-8').split(",")
-        router= line[0].replace("PEER_SRC_IP=", "")
-        in_iface= line[1].replace("IN_IFACE=", "")
-        
-        # ingresslink_list.append("{}.{}".format(router, in_iface))
-        ingresslink_dict["{}.{}".format(router, in_iface)] = True
-print("  ...done\n")
-
-print(len(ingresslink_dict))
-
 
 class IPD:    
     def __subnet_atts(self):
@@ -115,10 +68,98 @@ class IPD:
             return defaultdict(type)
         else:
             return defaultdict(lambda: self.__multi_dict(K-1, type))
+        
 
-    def __init__(self, params):
+    def read_router_ip_mapping(self, router_ip_mapping_file):
+        #provided by the ISP
+        #
+        # this file contains the internal router IP and its name
+        #
+        # format:
+        #   router_ip router_name
+        #   50.216.43.22 C1-R1
+        #   50.216.43.23 C1-R2
+        #   50.216.43.24 C1-R3
+
+        with open(router_ip_mapping_file, 'r') as csv_file:
+            router_ip_mapping_csv = csv.reader(csv_file, delimiter=' ')
+            router_ip_lookup_dict = {rows[0]:rows[1] for rows in router_ip_mapping_csv}
+        return router_ip_lookup_dict
+    
+
+    def read_ingresslink_file(self, ingresslink_file):
+        # provided by the ISP 
+        # 
+        # this file contains the interfaces of every router (on a daily base in out case) where the traffic ingresses
+        # this is necessary because in Netflow it is not possible to distinguish between ingressing and egressing traffic
+        #
+        # format:
+        #   router name, ingress interface,ASN
+        #   PEER_SRC_IP=C1-R1,IN_IFACE=204,&=123
+        #   PEER_SRC_IP=C1-R2,IN_IFACE=301,&=456
+        #   PEER_SRC_IP=C2-R1,IN_IFACE=207,&=789
+
+        print("> load ingresslink file")
+        ingresslink_dict= {}
+        
+        with gzip.open("{}".format(ingresslink_file), 'rb') as f:
+            for line in f:
+                line = line.decode('utf-8').split(",")
+                router= line[0].replace("PEER_SRC_IP=", "")
+                in_iface= line[1].replace("IN_IFACE=", "")
+                
+                # ingresslink_list.append("{}.{}".format(router, in_iface))
+                ingresslink_dict["{}.{}".format(router, in_iface)] = True
+        print("  ...done\n")
+
+        print(len(ingresslink_dict))
+        return ingresslink_dict
+    
+    def __init__(self):
         self.read_data_finisehd=False
+
+        # need PID to extract RAM usage of the process
         self.process = psutil.Process(os.getpid())
+
+
+        params = namedtuple('params', ['d', 't','b',  'e', 'q', 'c4', 'c6', 'cidrmax4', 'cidrmax6', 'decay', 'loglevel'])
+        parser = argparse.ArgumentParser()
+
+        config = configparser.ConfigParser()
+        config.read('ipd.config')
+
+
+
+        parser.add_argument('-t', default=config['IPD']['t'], type=int)
+        parser.add_argument('-q', default=config['IPD']['q'], type=float)
+        parser.add_argument('-cidrmax4', default=config['IPD']['cidr_max_v4'], type=int)
+        parser.add_argument('-cidrmax6', default=config['IPD']['cidr_max_v6'], type=int)
+        parser.add_argument('-c4', default=config['IPD']['min_samples_v4'], type=float)
+        parser.add_argument('-c6', default=config['IPD']['min_samples_v6'], type=float)
+        parser.add_argument('-e', default=config['IPD']['e'], type=int)
+        parser.add_argument('-decay', default=config['IPD']['decay'], type=str)
+        parser.add_argument('-loglevel', default=config['LOGGING']['loglevel'], type=int)
+        parser.add_argument('-bundle_delta', default=config['IPD']['allowed_bundle_share_delta'], type=float)
+        
+        parser.add_argument('-d', default="/data/fast/mehner/ipd/netflow_merged_sorted", type=str) # netflow100000.csv netflow100000000.csv
+        #parser.add_argument('-b', default=300, type=int)
+        # output folder
+        # bundle difference 
+        # ingresslink file -> TODO what if there is no file present?
+        # router ip mapping -> what if we dont have it? -> use router IPs?
+        
+        args = parser.parse_args()
+
+        if TEST:
+            #params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
+            params = params(args.d, 10, 0.05, 120, 0.51, 0.05, 1, 28, 48, 'default', logging.DEBUG)
+        else:
+            params = params(args.d, args.t, args.bundle_delta, args.e, args.q, args.c4, args.c6, args.cidrmax4, args.cidrmax6, args.decay, args.loglevel)
+
+        
+
+
+
 
         print("--- parametrization ---")
         print(f"d {params.d}")
@@ -134,14 +175,17 @@ class IPD:
         print(f"loglevel {params.loglevel}")
         print("------------------------")
 
-        # initialization
-        def pytricia_init():
+        # PyTricia uses 32 bit for constructing the trie by default.
+        # this is fine for IPv4 but for IPv6 it is not enough, so setting max number of bits to cidrmax6
+        def __pytricia_init():
             return pytricia.PyTricia(params.cidrmax6)
-        self.range_lookup_dict = self.__multi_dict(1, pytricia_init) #defaultdict(lambda: pytricia.PyTricia())
+        
+        # add 0.0.0.0/0 and ::/0 as starting point for the algorithm
+        self.range_lookup_dict = self.__multi_dict(1, __pytricia_init)
         self.range_lookup_dict[4].insert("0.0.0.0/0", "0.0.0.0/0")
         self.range_lookup_dict[6].insert("::/0", "::/0")
 
-        self.debug_flow_output_counter = 0
+        #self.debug_flow_output_counter = 0
 
         self.min_sample_cache=self.__multi_dict(2, int)
         
@@ -167,8 +211,17 @@ class IPD:
             6: params.c6
         }
 
-        self.output_folder = f"{results_path}/range/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
-        self.tree_output_folder = f"{results_path}/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
+
+        # self.linear_decay = 
+
+        # get ingress link dict
+        self.ingresslink_dict= self.read_ingresslink_file(config['PATH']['ingresslink_file'])
+
+        # get router ip mapping dict
+        self.router_ip_lookup_dict = self.read_router_ip_mapping(config['PATH']['router_ip_mapping_file'])
+
+        self.output_folder = f"{results_path}/range/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.tree_output_folder = f"{results_path}/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: 
             self.output_folder +="_TEST"
             if DUMP_TREE:
@@ -180,7 +233,7 @@ class IPD:
 
         # RESOURCE LOG
         os.makedirs(f"{results_path}/resource_log/{RESULT_PREFIX}", exist_ok=True)
-        self.resource_logfile = f"{results_path}/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
+        self.resource_logfile = f"{results_path}/resource_log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST:
             self.resource_logfile += "_TEST"
         self.resource_logfile += ".log"
@@ -191,20 +244,10 @@ class IPD:
         ########### LOGGER CONFIGURATION ###########
         ############################################
 
-        ll = params.loglevel
-        #if TEST: ll=logging.DEBUG
         os.makedirs(f"{results_path}/log/{RESULT_PREFIX}", exist_ok=True)
-        logfile = f"{results_path}/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}_{hostname}"
+        logfile = f"{results_path}/log/{RESULT_PREFIX}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
         if TEST: logfile += "_TEST"
         logfile+=".log"
-
-        fmode="w"
-        if RESUME_ON_LAST_SAVEPOINT: fmode="a"
-        logging.basicConfig(filename=logfile,
-                        format='%(asctime)s %(levelname)s %(funcName)s %(message)s',
-                        # datefmt='%y-%m-%d %H:%M:%S',
-                        filemode=fmode,
-                        level=ll)
 
         # Creating an object
         self.logger = logging.getLogger()
@@ -212,15 +255,11 @@ class IPD:
 
     def init_resource_consumption_logfile(self):
         fmode = "w"
-        if RESUME_ON_LAST_SAVEPOINT:
-            fmode = "a"
-
         with open(self.resource_logfile, fmode, newline='') as csvfile:
             writer = csv.writer(csvfile, delimiter=',')
             writer.writerow(['ts', 'ipd_ranges_count', 'ipd_cpu_runtime', 'iteration_cpu_runtime', 'ipd_runtime', 'iteration_runtime', 'ram_usage', 'shared_ram_usage', 'total_ram', 'avail_ram'])
 
     def log_resource_consumption(self, cur_ts, range_count, ipd_cpu_runtime, iteration_cpu_runtime, ipd_runtime, iteration_runtime, ram_usage, ram_shared, ram_total, ram_avail):
-
         with open(self.resource_logfile, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile, delimiter=',')
             writer.writerow([cur_ts, range_count, ipd_cpu_runtime, iteration_cpu_runtime, ipd_runtime, iteration_runtime, ram_usage, ram_shared, ram_total, ram_avail])
@@ -248,10 +287,6 @@ class IPD:
         return ram_usage, ram_shared, ram_total, ram_avail
 
 
-
-
-
-
     ## lookup in pytricia tree and return corresponding range
     # input: IP str "192.168.0.2"
     # output: range str. "0.0.0.0/0"
@@ -268,9 +303,6 @@ class IPD:
             pass
 
             res="0.0.0.0/0" if ip_version == 4 else "::/0"
-        if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: 
-            self.logger.debug("check corresponding range;  ip: {} ; range: {}".format(ip, res))
-            pass
         return res
 
     # input: IP str "192.168.0.2"
@@ -279,19 +311,13 @@ class IPD:
         ip_version = 6 if ":" in ip_address else 4
         return str(IPNetwork(f"{ip_address}/{self.cidr_max[ip_version]}").network)
 
-
-    def __get_min_samples(self, ip_version, mask, decrement=False):
-
-        if decrement:
-            cc= self.c[ip_version] * 0.001 # take 0.1% of min_samples as decrement baseline
-        else:            
-            cc = self.c[ip_version]
+    #
+    def __get_min_samples(self, ip_version, mask):   
+        cc = self.c[ip_version]
 
         ipv_max = 32
         if ip_version == 6:
             ipv_max = 64
-
-        
 
         min_samples= self.min_sample_cache[ip_version].get(mask, -1)
         if min_samples < 0:
@@ -308,7 +334,6 @@ class IPD:
 
         return min_samples
 
-
     def __split_ip_and_mask(self, prefix):
         # prefix should be in this format 123.123.123.123/12 or 2001:db8:abcd:0012::0/64
         ip, mask = prefix.split("/")
@@ -323,8 +348,7 @@ class IPD:
         prange, mask = range_string.split("/")
 
         return (int(ip_version),int(mask),prange)
-        
-
+    
     def __convert_range_path_to_single_elems(self, path):
         x = path.split("/")
         ip_version= int(x[0])
@@ -388,8 +412,7 @@ class IPD:
 
     # if raw=True: return not prevalent ingress, but dict with counters for all found routers
     def get_prevalent_ingress(self, ip_version, mask, prange, raw=False):
-        
-
+    
         cur_prevalent=None
         ratio= -1
         #sample_count= self.get_sample_count(path)
@@ -835,10 +858,6 @@ class IPD:
         # masked_ip = self.mask_ip(ip)
 
         prange, mask = self.__split_ip_and_mask(self.get_corresponding_range(masked_ip))
-        self.debug_flow_output_counter +=1
-        if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT:
-            self.logger.debug(f"add flow {masked_ip}, {ingress}, {last_seen} --> {ip_version}, {mask}, {masked_ip} --> {self.get_corresponding_range(masked_ip)}")
-            self.debug_flow_output_counter = 0
         
         # get current prev ingress if existing
         p_ingress=self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{}).get('prevalent', None)
@@ -849,22 +868,11 @@ class IPD:
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'][ingress] += i_count
             self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['total'] += i_count
 
-            # print("in: ", self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['ingress'])
-            # print("total: ", self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]['total'])
-            if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: 
-                self.logger.debug(f"  not classified yet - {self.subnet_dict[int(ip_version)][int(mask)][prange][masked_ip]}")
-                pass
-
         else: # 2) there is already a prevalent link
 
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['total'] += i_count # increment totals
             self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['prevalent_last_seen'] = int(last_seen)
         
-            if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: 
-                self.logger.debug(f"  already classified - {self.subnet_dict[int(ip_version)][int(mask)][prange]}")
-                pass
-
-
             if (bundle_indicator in p_ingress) and (ingress in self.bundle_dict[p_ingress].keys()): # 2b) there is a prevalent bundle:
                 self.bundle_dict[p_ingress][ingress] += i_count
 
@@ -876,12 +884,6 @@ class IPD:
                 pass
             else:
                 self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})['miss'] += i_count
-                if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: 
-                    self.logger.debug("  already classified but ingress not correct - {}".format(self.subnet_dict.get(ip_version, {}).get(mask,{}).get(prange,{})))
-                    pass
-
-            
-
 
 
     def __decay_counter(self, ip_version, mask, prange, current_ts, method="none"): # default, linear, stefan
@@ -902,20 +904,10 @@ class IPD:
 
         self.logger.debug("current_ts: {}; e: {}; last_seen: {}; age:{} total: {} miss: {} ".format(current_ts, self.e, last_seen, age, totc,misc) )
         reduce = 0
-        if method == 'default': # ingmar
-            # my $bucketExpireKeepFraction = 0.9; # all counts get decreased to this fraction every time a bucket is flushed. This fraction decreases for stale buckets
-            # $cidrIntRef->{ip}{$color}{$ipInt}{u} => $lastUpdate 
-            #
-            # sub getCleanKeepFactor{
-            #   (my $expireTime, my $lastUpdate) = @_;
-            #   my $age = $expireTime - $lastUpdate;
-            #   return 1 - (($age <= 0) ? $bucketExpireKeepFraction : ($bucketExpireKeepFraction/(int($age/$bucketSize)+1)));
-            # }
-            # my $reduce = int($cidrIntRef->{ip}{$color}{$ipInt}{c} * (getCleanKeepFactor($expireTime, $cidrIntRef->{ip}{$color}{$ipInt}{u})));
-            # $cidrIntRef->{ip}{$color}{$ipInt}{c} -= $reduce;
+        if method == 'default':
             def get_clean_keep_factor(age):
-                # age= expire_time - last_update
-                x = decay_ingmar_bucket_expire_keep_fraction if (age <=0) else decay_ingmar_bucket_expire_keep_fraction / (int(age/t) + 1)
+                # TODO seems little silly, ggf vereinfachen?
+                x = default_decay_keep_fraction if (age <=0) else default_decay_keep_fraction / (int(age/t) + 1)
                 return 1- x  
             
             reduce = get_clean_keep_factor(age)
@@ -928,25 +920,6 @@ class IPD:
                 for cur_ing in self.bundle_dict[prevalent_ingress].keys():
                     cur_val = self.bundle_dict[prevalent_ingress][cur_ing]
                     self.bundle_dict[prevalent_ingress][cur_ing] -= cur_val * reduce * (cur_val / total)
-
-
-        elif method == "stefan": # 0.1% of min samples for specific mask exponentially increasing by expired time buckets
-            s = self.__get_min_samples(ip_version, mask, decrement=True)
-            reduce = 0
-            try: 
-                reduce = int(math.pow(s, (int(age/t)+1 )))
-            except:
-                pass
-            misc -= reduce * (misc / totc)
-            totc -= reduce
-
-            # reduce bundle values
-            if (bundle_indicator in prevalent_ingress):
-                total = sum(self.bundle_dict[prevalent_ingress].values())
-                
-                for cur_ing in self.bundle_dict[prevalent_ingress].keys():
-                    cur_val = self.bundle_dict[prevalent_ingress][cur_ing]
-                    self.bundle_dict[prevalent_ingress][cur_ing] -= reduce * (cur_val / total)
 
         elif method == "linear":
             if age > self.e:
@@ -993,7 +966,6 @@ class IPD:
         if self.subnet_dict[ip_version][mask][prange].get("prevalent_last_seen", None) != None:
             
             #       already classified prefixes -> decrement function
-
             total_before = self.subnet_dict[ip_version][mask][prange].get("total")
 
             self.__decay_counter(ip_version, mask, prange, current_ts=current_ts, method=self.decay_method)
@@ -1066,11 +1038,6 @@ class IPD:
         with open(f"{self.tree_output_folder}/{current_ts}_cache.json", "w") as outfile:
             dump(self.ipd_cache, outfile, indent=4)
             
-
-        ## semi automatically dump dict to file
-        
-            
-
         tmp_dict = self.__multi_dict(2, int)
 
         #get v4 and v6 lpm
@@ -1156,11 +1123,6 @@ class IPD:
     
         self.logger.warning(
             f"{current_ts} RAM:{current_ram_usage_bytes} mem_process_rss:{self.process.memory_full_info().rss} mem_process_shared:{self.process.memory_full_info().shared} mem_node_total:{mem.total} mem_node_available:{mem.available}")
-        
-
-
-
-
 
         # debugging purpose
         for ipv in self.subnet_dict.keys():
@@ -1248,9 +1210,6 @@ class IPD:
         if IPv4_ONLY:
             self.logger.warning("!!! IPv4 Traffic only !!!")
 
-        # start nf reader thread that fills netflow_data_dict
-        # threading.Thread(target=self.read_netflow_worker, daemon=True).start()
-        
         # init generator 
         nf_data = self.read_netflow()
         last_ts = None
@@ -1258,41 +1217,10 @@ class IPD:
         ipd_t_end = 0
         ipd_cpu_t_end = 0
 
-        if RESUME_ON_LAST_SAVEPOINT:
-            # TODO load all dicts
-            sucessfully_loaded=False
-            try:
-                ts_lst = []
-                for i in glob(f"{self.tree_output_folder}/*_range*"):
-                    ts_lst.append((int(i.split("/")[-1].split("_")[0])))
-                cur_state_ts = max(ts_lst)
-                ext="json"
-                with open(f"{self.tree_output_folder}/{cur_state_ts}_bundles.{ext}", 'r') as j:
-                    bundle_dict = load(j.read())
-
-                with open(f"{self.tree_output_folder}/{cur_state_ts}_cache.{ext}", 'r') as j:
-                    ipd_cache = load(j.read())
-
-
-                with open(f"{self.tree_output_folder}/{cur_state_ts}.{ext}", 'r') as j:
-                    subnet_dict = load(j.read())
-
-                with open(f"{self.tree_output_folder}/{cur_state_ts}_range_lpm.{ext}", 'r') as j:
-                    d = load(j.read())
-
-                for ipv in d.keys():
-                    for prefix in d[ipv].keys():
-                        self.range_lookup_dict[int(ipv)].insert(prefix, d[ipv][prefix])
-                sucessfully_loaded = True
-            except:
-                pass
         # iterate over all netflow rows using our generator
         for nf_row in nf_data:
             # init
             cur_ts = int(nf_row[0])
-
-            if RESUME_ON_LAST_SAVEPOINT and sucessfully_loaded: 
-                if cur_state_ts > cur_ts: continue
         
             ingress = nf_row[1]
             src_ip = nf_row[2]
@@ -1303,19 +1231,9 @@ class IPD:
 
             # next epoch?
             if cur_ts > last_ts: 
-                self.logger.debug(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter}") # #\tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
-                print(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter} ") # \tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
+                self.logger.debug(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter}")
+                print(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter} ") 
                 add_counter=0
-
-                ### when current time bucket is fone -> add all new data to range / subnet and then run ipd!
-                self.logger.debug("PROFILING: add netflow to corresponding ranges - start")
-                # icount=1
-                # for masked_ip in nf_data:
-                #     for ingress in nf_data[masked_ip]:
-                #         icount= nf_data[masked_ip][ingress]
-                
-                
-                self.logger.debug("PROFILING: add netflow to corresponding ranges - done")
 
                 # measure time for ipd run
                 ipd_cpu_t_start = process_time()
@@ -1345,46 +1263,22 @@ class IPD:
                                             f'{ipd_runtime:.4f}', f'{iteration_runtime:.4f}', ram_usage, ram_shared, ram_total, ram_avail)
 
 
-
-
                 if DUMP_TREE: 
-                    if len(savepoints) > 0 and  cur_ts >= savepoints[0]: 
-                        self.dump_tree_to_file(cur_ts)
-                        self.logger.warning(f"dump state at {cur_ts} to disk")
-                        savepoints.pop(0)
+                    self.dump_tree_to_file(cur_ts)
+                    self.logger.warning(f"dump state at {cur_ts} to disk")
                 last_ts = cur_ts # next epoch
 
-            # still current epoch 
-            #self.netflow_data_dict[cur_ts][masked_ip][ingress] += 1         # add all masked_ip's with same router for current ts
-            if self.debug_flow_output_counter > DEBUG_FLOW_OUTPUT: self.logger.debug(f"add to subnet: {cur_ts} {masked_ip} {ingress} 1")
             self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=1)
             add_counter+=1
 
 
+    # reads netflow from stdin 
     def read_netflow(self):
-        added_counter=0
-        ram_counter=0
-        #for gzfile in gzfiles:
-            #with gzip.open(f"{input_path}/{gzfile}", 'rt') as f:
-            #with gzip.open(f"{input_path}/{gzfile}", 'rb') as f:
         for line in stdin:
-            #line = line.decode('utf-8').split(",")
-
-            ####################################################
-            ####### CHECK RAM USAGE TO PREVENT FREEEZING #######
-            ####################################################
-            if ram_counter >= RAM_CHECK_AFTER_N_LINES:
-                ram_counter =0
-                
-                if psutil.virtual_memory()[2] > RAM_THRESHOLD:
-                    self.logger.warning(f"RAM WARNING: currently {psutil.virtual_memory()[2]} in use -> cooldown for {RAM_COOLDOWN_TIME} seconds")
-                    sleep(RAM_COOLDOWN_TIME)             
-            ram_counter+=1
-            ####################################################
             if not REDUCED_NETFLOW_FILES: line = line.rstrip()
 
             line = line.split(col_mapping.get('sep'))
-            router_name = router_ip_lookup_dict.get(line[col_mapping.get('peer_src_ip')])
+            router_name = self.router_ip_lookup_dict.get(line[col_mapping.get('peer_src_ip')])
             
             if IPv4_ONLY:
                 ip_version = 4 if not ":" in line[col_mapping.get('src_ip')] else 6
@@ -1396,11 +1290,9 @@ class IPD:
             
             if line[col_mapping.get('ts_end')] == "TIMESTAMP_END":
                 continue
-            if not ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
+            if not self.ingresslink_dict.get("{}.{}".format(router_name,in_iface), False): continue
             src_ip = line[col_mapping.get('src_ip')]
             cur_ts = int(int(line[col_mapping.get('ts_end')]) / self.t) * self.t
-            added_counter +=1
-
 
             yield (cur_ts, "{}.{}".format(router_name,in_iface), src_ip)
                     
@@ -1423,8 +1315,8 @@ class IPD:
 
             # next epoch?
             if cur_ts > last_ts: 
-                self.logger.debug(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter}") # #\tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
-                print(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter} ") # \tlpm cache hits: {self.cache_counter}\t(elems: {len(self.range_lookup_cache_dict[4])} bzw. {len(self.range_lookup_cache_dict[6])})")
+                self.logger.debug(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter}") 
+                print(f"{self.output_folder}\t{last_ts}\tflows added: {add_counter} ")
 
                 add_counter=0
                 
@@ -1439,64 +1331,8 @@ class IPD:
         print("finish read_netflow_worker ")
         self.netflow_data_dict[-1] = None
 
-def do_it():
-        pass
 if __name__ == '__main__':   
+ 
+    ipd = IPD()
 
-    
-    params = namedtuple('params', ['d', 't','b',  'e', 'q', 'c4', 'c6', 'cidrmax4', 'cidrmax6', 'decay', 'loglevel'])
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('-c4', default=64, type=float)
-    parser.add_argument('-c6', default=24, type=float)
-    parser.add_argument('-t', default=60, type=int)
-    parser.add_argument('-b', default=300, type=int)
-    parser.add_argument('-e', default=120, type=int)
-    parser.add_argument('-q', default=0.95, type=float)
-    parser.add_argument('-cidrmax4', default=28, type=int)
-    parser.add_argument('-cidrmax6', default=48, type=int)
-    parser.add_argument('-d', default="/data/fast/mehner/ipd/netflow_merged_sorted", type=str) # netflow100000.csv netflow100000000.csv
-    parser.add_argument('-decay', default="default", type=str)
-    parser.add_argument('-loglevel', default=20, type=int)
-
-    
-    args = parser.parse_args()
-    print("--- parametrization ---")
-    print(f"c4 {args.c4}")
-    print(f"c6 {args.c6}")
-    print(f"t {args.t}")
-    print(f"b {args.b}")
-    print(f"e {args.e}")
-    print(f"q {args.q}")
-    print(f"cidrmax4 {args.cidrmax4}")
-    print(f"cidrmax6 {args.cidrmax6}")
-    print(f"dataset {args.d}")
-    print("------------------------")
-
-    dataset=args.d
-    t = args.t #60
-    bucket_output = args.b #60
-    e=  args.e #120
-    q = args.q # 0.80
-    decay_method=args.decay
-
-
-    cidr_max = {
-        4: args.cidrmax4,
-        6: args.cidrmax6
-    }
-    c = {
-        4: args.c4,
-        6: args.c6
-    }
-
-
-    if TEST:
-        #params = params(dataset, 10, 0.05, 5, 0.501, 0.000025, 0.0000025, 28, 48, 'default', logging.DEBUG)
-        params = params(dataset, 10, 0.05, 120, 0.51, 0.05, 1, 28, 48, 'default', logging.DEBUG)
-   
-    else:
-        params = params(dataset, t, 0.05, e, q, c[4], c[6], cidr_max[4], cidr_max[6], decay_method, args.loglevel)
-
-    ipd = IPD(params)
     ipd.run()
