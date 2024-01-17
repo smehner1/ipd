@@ -7,7 +7,7 @@ import math
 import io
 import os
 from time import process_time, time
-from json import loads, dump
+from json import loads, dump, load
 from sys import stdin
 import psutil
 import argparse
@@ -74,6 +74,8 @@ class IPD:
 
         # setting up everything
         self.read_data_finisehd = False
+        self.iteration_counter = 0
+        self.iteration_counter_dump = 0
 
         # need PID to extract RAM usage of the process
         self.process = psutil.Process(os.getpid())
@@ -132,6 +134,8 @@ class IPD:
         self.e = args.e
         self.q = args.q
         self.decay_method = args.decay
+        self.b = args.bundle_delta
+        self.loglevel = args.loglevel
 
         self.cidr_max = {
             4: args.cidrmax4,
@@ -142,16 +146,18 @@ class IPD:
             6: args.c6
         }
 
-        self.linear_decay = config['MISC']['linear_decay']
-        self.default_decay_keep_fraction = config['MISC']['default_decay_keep_fraction']
-        self.bundle_indicator = config['MISC']['bundle_indicator']
-        self.range_output_freq = config['MISC']['range_output_freq']
+        parameterset_string = f"q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
 
-        self.DUMP_TREE = config.getboolean('GENERAL', 'dump_tree')
+        self.linear_decay = config.getint('MISC', 'linear_decay')
+        self.default_decay_keep_fraction = config.getfloat('MISC', 'default_decay_keep_fraction')
+        self.bundle_indicator = config['MISC']['bundle_indicator']
+        self.output_freq = config.getint('MISC', 'output_freq')
+        self.tree_dump_freq = config.getint('MISC', 'tree_dump_freq')
+
         self.IPv4_ONLY = config.getboolean('GENERAL', 'ip_v4_only')
 
-        self.result_path = config['PATH']['result_path']
-        self.result_prefix = config['GENERAL']['result_prefix']
+        self.result_path = config.get('PATH', 'result_path')
+        self.result_prefix = config.get('GENERAL', 'result_prefix')
 
         # get ingress link dict
         self.ingresslink_dict = self.read_ingresslink_file(config['PATH']['ingresslink_file'])
@@ -162,21 +168,19 @@ class IPD:
         # get Netflow column mapping
         self.col_mapping = loads(config['NETFLOW']['netflow_column_mapping'])
 
-        self.range_output_folder = f"{self.result_path}/range/{self.result_prefix}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.range_output_folder = f"{self.result_path}/{self.result_prefix}/range/{parameterset_string}"
 
-        # TODO
-        self.subnet_output_folder = f"{self.result_path}/subnet/{self.result_prefix}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        self.subnet_output_folder = f"{self.result_path}/{self.result_prefix}/subnet/{parameterset_string}"
+        self.tree_output_folder = f"{self.result_path}/{self.result_prefix}/tree/{parameterset_string}"
 
-        self.tree_output_folder = f"{self.result_path}/{self.result_prefix}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-
+        os.makedirs(self.subnet_output_folder, exist_ok=True)
         os.makedirs(self.range_output_folder, exist_ok=True)
-        if self.DUMP_TREE:
+        if self.tree_dump_freq > 0:
             os.makedirs(self.tree_output_folder, exist_ok=True)
 
         # RESOURCE LOG
-        os.makedirs(f"{self.result_path}/resource_log/{self.result_prefix}", exist_ok=True)
-        self.resource_logfile = f"{self.result_path}/resource_log/{self.result_prefix}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
-        self.resource_logfile += ".log"
+        os.makedirs(f"{self.result_path}/{self.result_prefix}/resource_log", exist_ok=True)
+        self.resource_logfile = f"{self.result_path}/{self.result_prefix}/resource_log/{parameterset_string}.log"
 
         self.init_resource_consumption_logfile()
 
@@ -184,10 +188,14 @@ class IPD:
         ########### LOGGER CONFIGURATION ###########
         ############################################
 
-        os.makedirs(f"{self.result_path}/log/{self.result_prefix}", exist_ok=True)
-        logfile = f"{self.result_path}/log/{self.result_prefix}/q{self.q}_c{self.c[4]}-{self.c[6]}_cidr_max{self.cidr_max[4]}-{self.cidr_max[6]}_t{self.t}_e{self.e}_decay{self.decay_method}"
+        os.makedirs(f"{self.result_path}/{self.result_prefix}/log/", exist_ok=True)
+        logfile = f"{self.result_path}/{self.result_prefix}/log/{parameterset_string}.log"
 
-        logfile += ".log"
+        logging.basicConfig(filename=logfile,
+                            format='%(asctime)s %(levelname)s %(funcName)s %(message)s',
+                            # datefmt='%y-%m-%d %H:%M:%S',
+                            filemode="w",
+                            level=self.loglevel)
 
         # Creating an object
         self.logger = logging.getLogger()
@@ -771,7 +779,7 @@ class IPD:
         if method == 'default':
 
             def get_clean_keep_factor(age):
-                x = self.default_decay_keep_fraction / (int(age / self.t) + 1) if age > 0 else self.default_decay_keep_fraction
+                x = float(self.default_decay_keep_fraction) / (int(age / self.t) + 1) if age > 0 else self.default_decay_keep_fraction
                 return 1 - x
 
             reduce = get_clean_keep_factor(age)
@@ -891,7 +899,6 @@ class IPD:
             self.logger.info(f"     {ip_version} {mask} {prange}: {pop_counter} IPs expired")
 
     def dump_tree_to_file(self, current_ts):
-        self.logger.debug("PROFILING: dump tree to filesystem - start")
         with open(f"{self.tree_output_folder}/{current_ts}.json", "w") as outfile:
             dump(self.subnet_dict, outfile, indent=4)
         with open(f"{self.tree_output_folder}/{current_ts}_bundles.json", "w") as outfile:
@@ -912,18 +919,26 @@ class IPD:
         tmp_dict = {}
         self.logger.debug("PROFILING: dump tree to filesystem - done")
 
-    def dump_classified_ranges_to_file(self, current_ts):
+    #                                           range || subnet
+    def dump_ranges_to_file(self, current_ts, what="range"):
         # format:
         # unix_ts, ip_version, 'range', confidence, samples/samplesneeded, range, ingress router
         # 1612001700      4       range   1.000   12732733/139022 64.0.0.0/7     C1-R2.710
         # 1612001700      4       range   0.998   13527047/69511  128.0.0.0/9     C1-R2.110
         # 1612001700      4       range   0.993   17985418/69511  128.128.0.0/9   C1-R2.117
-        output_file = f"{self.range_output_folder}/range.{current_ts}.gz"
+
+        if what == "subnet":
+            output_file = f"{self.subnet_output_folder}/{what}.{current_ts}.gz"
+
+        elif what == "range":
+            output_file = f"{self.range_output_folder}/{what}.{current_ts}.gz"
+        else:
+            self.logger.warning(f"don't know what to dump! -> {what} is unknown")
+            return
 
         self.logger.info(f"dump to file: {output_file}")
         with gzip.open(output_file, 'wb') as ipd_writer:
 
-            # Needs to be a bytestring in Python 3
             with io.TextIOWrapper(ipd_writer, encoding='utf-8') as encode:
 
                 for ip_version in self.subnet_dict.keys():
@@ -931,20 +946,56 @@ class IPD:
                         for prange in self.subnet_dict[ip_version][mask].keys():
 
                             ingress = self.subnet_dict[ip_version][mask][prange].get('prevalent', None)
-                            if ingress == None:
+                            min_samples = self.__get_min_samples(ip_version, mask)
+
+                            # range files only contain classified ranges; subnet files contain everything
+                            if what == 'range' and ingress == None:
                                 continue
 
-                            min_samples = self.__get_min_samples(ip_version, mask)
-                            miss_samples = int(self.subnet_dict[ip_version][mask][prange]['miss'])
-                            total_samples = int(self.subnet_dict[ip_version][mask][prange]['total'])
+                            # subnet and range with no prevalent ingress
+                            elif what == 'subnet' and ingress == None:
+                                ingress_summary = defaultdict(int)
+                                total_samples = 0
 
-                            if min_samples > total_samples:
-                                self.logger.warning(f"total count lower than min samples: {total_samples} / {min_samples}")
-                                self.logger.warning(f"{self.subnet_dict[ip_version][mask][prange]}")
-                            ratio = 1-(miss_samples / total_samples)
+                                # get all ingress routers and counters for every masked_ip for the current range
+                                for masked_ip, details in self.subnet_dict[ip_version][mask][prange].items():
+                                    total_samples += details.get('total', 0)
+                                    for ingress_key, count in details.get('ingress', {}).items():
+                                        ingress_summary[ingress_key] += count
 
-                            self.logger.info(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}")
-                            encode.write(f"{current_ts}\t{ip_version}\trange\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}\n")
+                                if ingress_summary:
+                                    # Sort ingress_summary by value in descending order
+                                    sorted_ingress = dict(sorted(ingress_summary.items(), key=lambda item: item[1], reverse=True))
+
+                                    # Extract the ingress key with the highest count
+                                    top_ingress_key, top_count = next(iter(sorted_ingress.items()))
+
+                                    # Convert the sorted ingress_summary to a string representation
+                                    ingress_str = ','.join(f"{key}={value}" for key, value in sorted_ingress.items())
+                                    ingress = f"{top_ingress_key}({ingress_str})"
+
+                                    ratio = top_count/total_samples
+                                else:
+                                    print(f"ingress summary empty: {ip_version} {mask} {prange} {self.subnet_dict[ip_version][mask][prange].items()}")
+                                    self.logger.warning(f"ingress summary empty: {ip_version} {mask} {prange}")
+                                    continue
+
+                            # should be range or subnet and ingres != None
+                            else:
+                                try:
+                                    miss_samples = int(self.subnet_dict[ip_version][mask][prange]['miss'])
+                                    total_samples = int(self.subnet_dict[ip_version][mask][prange]['total'])
+                                except:
+                                    continue
+
+                                if min_samples > total_samples:
+                                    self.logger.warning(f"total count lower than min samples: {total_samples} / {min_samples}")
+                                    self.logger.warning(f"{self.subnet_dict[ip_version][mask][prange]}")
+                                ratio = 1-(miss_samples / total_samples)
+
+                            self.logger.info(
+                                f"{current_ts}\t{ip_version}\t{what}\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}")
+                            encode.write(f"{current_ts}\t{ip_version}\t{what}\t{ratio:.3f}\t{total_samples}/{min_samples}\t{prange}/{mask}\t{ingress}\n")
 
         self.logger.info(f"dump finished")
 
@@ -1024,8 +1075,19 @@ class IPD:
                     self.logger.info("skip this range since there is nothing to do here")
                     continue
 
-        if current_ts % int(self. t * self.range_output_freq) == 0:
-            self.dump_classified_ranges_to_file(current_ts)
+        self.iteration_counter += 1
+        if self.tree_dump_freq > 0:
+            self.iteration_counter_dump += 1
+
+        if self.iteration_counter == self.output_freq:
+            self.dump_ranges_to_file(current_ts, what="range")
+            self.dump_ranges_to_file(current_ts, what="subnet")
+            self.iteration_counter = 0
+
+        if self.tree_dump_freq > 0 and self.iteration_counter_dump == self.tree_dump_freq:
+            self.dump_tree_to_file(current_ts)
+            self.logger.warning(f"dump state at {current_ts} to disk")
+            self.iteration_counter_dump = 0
 
         self.logger.debug("bundles: {}".format(self.bundle_dict))
         self.logger.warning(".............Finished.............\n")
@@ -1090,9 +1152,6 @@ class IPD:
                 self.log_resource_consumption(cur_ts, ranges_count, f'{ipd_cpu_runtime:.4f}', f'{iteration_cpu_runtime:.4f}',
                                               f'{ipd_runtime:.4f}', f'{iteration_runtime:.4f}', ram_usage, ram_shared, ram_total, ram_avail)
 
-                if self.DUMP_TREE:
-                    self.dump_tree_to_file(cur_ts)
-                    self.logger.warning(f"dump state at {cur_ts} to disk")
                 last_ts = cur_ts  # next epoch
 
             self.add_to_subnet(last_seen=cur_ts, masked_ip=masked_ip, ingress=ingress, i_count=1)
