@@ -275,7 +275,7 @@ class IPD:
 
             self.min_sample_cache[ip_version][mask] = min_samples
 
-        return min_samples
+        return max(1, min_samples)
 
     def __split_ip_and_mask(self, prefix):
         # prefix should be in this format 123.123.123.123/12 or 2001:db8:abcd:0012::0/64
@@ -976,8 +976,7 @@ class IPD:
 
                                     ratio = top_count/total_samples
                                 else:
-                                    print(f"ingress summary empty: {ip_version} {mask} {prange} {self.subnet_dict[ip_version][mask][prange].items()}")
-                                    self.logger.warning(f"ingress summary empty: {ip_version} {mask} {prange}")
+                                    # skip empty ranges
                                     continue
 
                             # should be range or subnet and ingres != None
@@ -999,8 +998,10 @@ class IPD:
 
         self.logger.info(f"dump finished")
 
+    # this method is called every IPD iteration
     def run_ipd(self, current_ts):
 
+        # list with all pranges that need to be processed in the current iteration
         check_list = []
 
         self.logger.info(f"prepare check_list")
@@ -1019,6 +1020,7 @@ class IPD:
             for mask in self.subnet_dict[ipv].keys():
                 self.logger.warning(f" ipv{ipv} mask: {mask} -> {len(self.subnet_dict[ipv][mask].keys())}")
 
+        # process ramges
         while len(check_list) > 0:
 
             # get the items
@@ -1075,6 +1077,7 @@ class IPD:
                     self.logger.info("skip this range since there is nothing to do here")
                     continue
 
+        # dump subnet, range and the full tree
         self.iteration_counter += 1
         if self.tree_dump_freq > 0:
             self.iteration_counter_dump += 1
