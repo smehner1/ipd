@@ -2,7 +2,7 @@ import os
 import argparse
 import pandas as pd
 
-EGRESS_LINKS: list = [('COTT', 'NEWY', 2), ('NEWY', 'NEWY', 3), ('SANF', 'SANF', 4), ('SAOP', 'SANF', 5)]
+EGRESS_LINKS: list = [('BERL', 'NEWY', 2), ('NEWY', 'NEWY', 3), ('SANF', 'SANF', 4), ('SAOP', 'SANF', 5)]
 CENTER_AS: int = 1
 
 
@@ -17,7 +17,7 @@ def init_parser() -> argparse.ArgumentParser:
     parser.add_argument('--minidir',
                         help='path to directory of mini internet',
                         type=str,
-                        default='/home/max/WORK/mini-internet/',
+                        default='../mini-internet',
                         )
 
     return parser

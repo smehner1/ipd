@@ -6,10 +6,8 @@ import datetime
 import argparse
 import pandas as pd
 
-__author__ = 'Max Bergmann'
 
-
-def init_Parser() -> argparse.ArgumentParser:
+def init_parser() -> argparse.ArgumentParser:
     '''initializes the parser of this script with the needed arguments and returns the parser'''
     parser: argparse.ArgumentParser = argparse.ArgumentParser()
 
@@ -150,7 +148,7 @@ def preprocess_netflows(netflow_dir: str) -> pd.DataFrame:
 
 def main() -> None:
     try:
-        parser: argparse.ArgumentParser = init_Parser()
+        parser: argparse.ArgumentParser = init_parser()
         args: argparse.Namespace = parser.parse_args()
 
         netflows: pd.DataFrame = preprocess_netflows(args.nf)

@@ -4,7 +4,7 @@ conda=$1
 
 PYTHON="${conda}/envs/mini-ipd/bin/python3"
 MINIDIR="../mini-internet/"  # directory that includes the mini internet
-IPDDIR=$(pwd)  # "/home/max/WORK/ipd-implementation/"
+IPDDIR=$(pwd)  
 
 # read possible flags, otherwise use default values
 while getopts "p:m" OPTION; do
@@ -30,7 +30,7 @@ done
 shift "$(($OPTIND -1))"
 
 FILE_PATH="$(dirname -- "${BASH_SOURCE[0]}")"            # relative
-FILE_PATH="$(cd -- "$FILE_PATH" && pwd)"    # absolutized and normalized
+FILE_PATH="$(cd -- "$FILE_PATH" && pwd)"    # absolute and normalized
 if [[ -z "$FILE_PATH" ]] ; then
   exit 1  # fail
 fi
