@@ -8,7 +8,7 @@ PYTHON="${conda}/envs/mini-ipd/bin/python3"
 tools/extract_ingresslink.sh $conda
 $PYTHON tools/extract_router_lookup_table.py
 
-zcat $file | $PYTHON algo_mini-ipd.py \
+zcat $file | $PYTHON algo.py \
     -q=0.7 \
     -c4=1 \
     -c6=12 \
