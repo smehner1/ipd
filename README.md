@@ -6,7 +6,7 @@ We have deployed IPD for over six years at a major tier-1 ISP with an internatio
 IPD enabled the ISP to improve network operations by identifying performance issues and realizing advanced traffic engineering practices.
 
 With the paper's acceptance, we plan to release the IPD implementation, including a prototype ISP scenario within the educational [Mini
-Internet environment](mini-inter.net) environment, to facilitate quick exploration. 
+Internet environment](https://www.mini-inter.net) environment, to facilitate quick exploration. 
 This repository is part of that and contains a Python3 implementation of IPD, optimized for use within the Mini Internet framework. 
 Finally, there will be a repository that loads both the Mini Internet repository and this one as git submodules to run a fully automated ISP scenario.
 
