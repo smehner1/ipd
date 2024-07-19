@@ -1,0 +1,3 @@
+pytricia
+netaddr
+psutil
